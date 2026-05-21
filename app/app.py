@@ -335,23 +335,33 @@ def _latest_orders_import():
 # material_map.proposed_plan_* and surfaced on the mapping page for admin
 # review; nothing is auto-applied.
 
-_NORM_PUNCT_RE = re.compile(r"[^a-z0-9]+")
+# Keep '+' so 'Monster +' stays distinguishable from 'Monster' through norm.
+_NORM_PUNCT_RE = re.compile(r"[^a-z0-9+]+")
 _PARENS_RE = re.compile(r"\s*\([^)]*\)")
 
 # Bidirectional abbreviation expansions. Applied before the alphanumeric
 # squash so that "MTS V4" and "Multistrada V4" both normalize to "mtsv4".
 # The long form is replaced by the short form (one direction is enough as
 # long as both sides of any potential match get normalized the same way).
+# Longer phrases are listed first so they match before any of their
+# constituent words.
 _ABBREV = [
+    # multi-word phrases first
+    ("pikes peak",   "pp"),
+    ("pikespeak",    "pp"),
+    ("desert x",     "dsx"),
+    # single-word
     ("multistrada",  "mts"),
     ("streetfighter", "sf"),
+    ("hypermotard",  "hym"),
+    ("xdiavel",      "xdvl"),
     ("monster",      "mon"),
     ("panigale",     "pan"),
     ("diavel",       "dvl"),
-    ("hypermotard",  "hym"),
-    ("desert x",     "dsx"),
     ("desertx",      "dsx"),
     ("scrambler",    "scr"),
+    # punctuation-style synonyms
+    ("plus",         "+"),
 ]
 
 
@@ -408,15 +418,21 @@ def _auto_suggest_mappings():
 
     # Index every (plan_super, plan_model) under its name variants.
     # `by_super_model`: keyed on (norm_super, norm_model_variant)
-    # `by_model`:       keyed on norm_model_variant — first-seen wins, so we
-    #                   skip storing if a different plan already claims that
-    #                   normalized name (ambiguous, leave unsuggested).
+    # `by_model`:       keyed on norm_model_variant — ambiguous keys are
+    #                   removed so we never blindly pick one of two plans.
+    # `super_index`:    map norm(plan_super) → set of plans for substring
+    #                   fallback (so we can scope substring matches to the
+    #                   right product family when possible).
     by_super_model = {}
     by_model = {}
+    super_index = {}
     _model_seen = set()
     _model_ambig = set()
+    all_plans = set()
     for r in plan_pairs:
         ps, pm = r["plan_super"], r["plan_model"]
+        all_plans.add((ps, pm))
+        super_index.setdefault(_norm(ps), set()).add((ps, pm))
         for variant in _name_variants(pm):
             key = _norm(variant)
             by_super_model[(_norm(ps), key)] = (ps, pm)
@@ -450,15 +466,71 @@ def _auto_suggest_mappings():
             bm = o["bike_model"]
             for bm_variant in _name_variants(bm):
                 bm_key = _norm(bm_variant)
+                # Tier 1: exact (super, model) match
                 match = by_super_model.get((_norm(bs), bm_key))
                 if match:
                     break
+                # Tier 2: exact model-only match (unambiguous)
                 m2 = by_model.get(bm_key)
                 if m2:
                     match = m2
                     break
             if match:
                 break
+
+        # Tier 3: substring match. For each (bs, bm), find plan_models whose
+        # normalized form is a substring of the normalized bike_model (or
+        # vice versa). Restrict to plans whose super matches the bike super
+        # when both are present, to avoid cross-family false positives. Pick
+        # the longest matching plan_model name — it's the most specific.
+        if match is None:
+            for o in orders:
+                bs = o["bike_super_model"]
+                bm = o["bike_model"]
+                bs_norm = _norm(bs)
+                # Decide candidate plan set: those with a matching super, OR
+                # all plans if bike has no super.
+                candidate_plans = set()
+                if bs_norm:
+                    # Match plans whose super normalizes to a prefix of the
+                    # bike super or vice versa (so 'Panigale V4' bike super
+                    # matches plan super 'Panigale').
+                    for plan_super_norm, plans in super_index.items():
+                        if not plan_super_norm:
+                            continue
+                        if (plan_super_norm in bs_norm
+                                or bs_norm in plan_super_norm):
+                            candidate_plans |= plans
+                if not candidate_plans:
+                    candidate_plans = all_plans
+
+                for bm_variant in _name_variants(bm):
+                    bm_norm = _norm(bm_variant)
+                    if len(bm_norm) < 4:
+                        continue
+                    hits = []
+                    for ps, pm in candidate_plans:
+                        for pm_variant in _name_variants(pm):
+                            pm_norm = _norm(pm_variant)
+                            if len(pm_norm) < 4:
+                                continue
+                            if pm_norm in bm_norm or bm_norm in pm_norm:
+                                hits.append((len(pm_norm), ps, pm))
+                                break
+                    if not hits:
+                        continue
+                    hits.sort(reverse=True)  # longest plan_model first
+                    # Accept only if the top hit is strictly the most
+                    # specific — i.e. not tied with another candidate of
+                    # the same length but different (ps, pm).
+                    top_len = hits[0][0]
+                    top_set = {(h[1], h[2]) for h in hits if h[0] == top_len}
+                    if len(top_set) == 1:
+                        match = top_set.pop()
+                        break
+                if match:
+                    break
+
         if match is None:
             continue
         con.execute(
@@ -865,6 +937,17 @@ def admin_mapping_dump():
             r["bike_supers"] or "",
             r["bike_models"] or "",
         ]))
+
+    plan_pairs = con.execute(
+        "SELECT DISTINCT plan_super, plan_model FROM plan "
+        "WHERE plan_model IS NOT NULL "
+        "ORDER BY plan_super, plan_model"
+    ).fetchall()
+    lines.append("")
+    lines.append(f"== plan ({len(plan_pairs)} distinct super/model pairs) ==")
+    for p in plan_pairs:
+        lines.append(f"  {p['plan_super'] or '(none)'} | {p['plan_model']}")
+
     return Response("\n".join(lines), mimetype="text/plain")
 
 
