@@ -336,19 +336,65 @@ def _latest_orders_import():
 # review; nothing is auto-applied.
 
 _NORM_PUNCT_RE = re.compile(r"[^a-z0-9]+")
+_PARENS_RE = re.compile(r"\s*\([^)]*\)")
+
+# Bidirectional abbreviation expansions. Applied before the alphanumeric
+# squash so that "MTS V4" and "Multistrada V4" both normalize to "mtsv4".
+# The long form is replaced by the short form (one direction is enough as
+# long as both sides of any potential match get normalized the same way).
+_ABBREV = [
+    ("multistrada",  "mts"),
+    ("streetfighter", "sf"),
+    ("monster",      "mon"),
+    ("panigale",     "pan"),
+    ("diavel",       "dvl"),
+    ("hypermotard",  "hym"),
+    ("desert x",     "dsx"),
+    ("desertx",      "dsx"),
+    ("scrambler",    "scr"),
+]
 
 
 def _norm(s):
-    """Aggressive normalize for fuzzy name matching: lowercase, drop non-
-    alphanumerics. So 'MTS V4 S / MTS V4 S MTO' → 'mtsv4smtsv4smto'."""
+    """Aggressive normalize for fuzzy name matching: lowercase, expand model
+    abbreviations, drop everything non-alphanumeric."""
     if s is None:
         return ""
-    return _NORM_PUNCT_RE.sub("", str(s).lower())
+    s = str(s).lower()
+    for long_form, short_form in _ABBREV:
+        s = s.replace(long_form, short_form)
+    return _NORM_PUNCT_RE.sub("", s)
+
+
+def _name_variants(name):
+    """Yield reasonable alternative forms of a model name so a single plan
+    entry like 'MTS V4 S / MTS V4 S MTO' matches either side, and
+    'Desert X (896)' matches both with and without the parenthetical."""
+    if not name:
+        return []
+    seen = set()
+    variants = []
+
+    def _add(v):
+        v = (v or "").strip()
+        if v and v not in seen:
+            seen.add(v)
+            variants.append(v)
+
+    _add(name)
+    # Split on '/' (slash with optional surrounding whitespace) — common for
+    # plan_models that bundle a couple of SKUs into one row.
+    for part in re.split(r"\s*/\s*", name):
+        _add(part)
+    # Strip parenthetical bits like "(896)".
+    stripped = _PARENS_RE.sub("", name).strip()
+    _add(stripped)
+    return variants
 
 
 def _auto_suggest_mappings():
     """For every status='unmapped' row in material_map that hasn't been
-    rejected, look at one of its orders' (bike_super_model, bike_model) and
+    rejected, look at its orders' (bike_super_model, bike_model) values and
     try to find a matching (plan_super, plan_model) in the current plan.
     Writes the match (if any) to proposed_plan_super / proposed_plan_model.
     Returns the count of new proposals made."""
@@ -360,15 +406,27 @@ def _auto_suggest_mappings():
     if not plan_pairs:
         return 0
 
-    # Exact-normalized lookup on (super, model), and a model-only fallback
-    # for cases where the orders sheet leaves bike_super_model empty.
+    # Index every (plan_super, plan_model) under its name variants.
+    # `by_super_model`: keyed on (norm_super, norm_model_variant)
+    # `by_model`:       keyed on norm_model_variant — first-seen wins, so we
+    #                   skip storing if a different plan already claims that
+    #                   normalized name (ambiguous, leave unsuggested).
     by_super_model = {}
     by_model = {}
+    _model_seen = set()
+    _model_ambig = set()
     for r in plan_pairs:
         ps, pm = r["plan_super"], r["plan_model"]
-        by_super_model[(_norm(ps), _norm(pm))] = (ps, pm)
-        # First-seen wins for model-only; ambiguous matches stay unsuggested.
-        by_model.setdefault(_norm(pm), (ps, pm))
+        for variant in _name_variants(pm):
+            key = _norm(variant)
+            by_super_model[(_norm(ps), key)] = (ps, pm)
+            if key in _model_seen and by_model.get(key) != (ps, pm):
+                _model_ambig.add(key)
+            else:
+                _model_seen.add(key)
+                by_model[key] = (ps, pm)
+    for key in _model_ambig:
+        by_model.pop(key, None)
 
     candidates = con.execute(
         "SELECT material_prefix FROM material_map "
@@ -378,17 +436,29 @@ def _auto_suggest_mappings():
     n = 0
     for c in candidates:
         prefix = c["material_prefix"]
-        order = con.execute(
-            "SELECT bike_super_model, bike_model FROM orders "
-            "WHERE material_prefix=? AND bike_model IS NOT NULL LIMIT 1",
+        # Try every distinct (super, model) pair we've seen for this prefix,
+        # not just one — different colour/spec orders may name the bike a bit
+        # differently and one might match cleanly.
+        orders = con.execute(
+            "SELECT DISTINCT bike_super_model, bike_model FROM orders "
+            "WHERE material_prefix=? AND bike_model IS NOT NULL",
             (prefix,),
-        ).fetchone()
-        if not order:
-            continue
-        match = by_super_model.get((_norm(order["bike_super_model"]),
-                                    _norm(order["bike_model"])))
-        if match is None:
-            match = by_model.get(_norm(order["bike_model"]))
+        ).fetchall()
+        match = None
+        for o in orders:
+            bs = o["bike_super_model"]
+            bm = o["bike_model"]
+            for bm_variant in _name_variants(bm):
+                bm_key = _norm(bm_variant)
+                match = by_super_model.get((_norm(bs), bm_key))
+                if match:
+                    break
+                m2 = by_model.get(bm_key)
+                if m2:
+                    match = m2
+                    break
+            if match:
+                break
         if match is None:
             continue
         con.execute(
@@ -655,6 +725,8 @@ def admin_mapping():
     rows = con.execute(
         f"SELECT mm.*, "
         f"(SELECT COUNT(*) FROM orders o WHERE o.material_prefix = mm.material_prefix) AS order_count, "
+        f"(SELECT {db.group_concat_distinct('bike_super_model')} FROM orders o "
+        f"  WHERE o.material_prefix = mm.material_prefix) AS bike_supers, "
         f"(SELECT {db.group_concat_distinct('bike_model')} FROM orders o "
         f"  WHERE o.material_prefix = mm.material_prefix) AS bike_models "
         f"FROM material_map mm "

@@ -35,7 +35,10 @@
         <form method="post" action="{{ url_for('admin_mapping_update') }}">
           <input type="hidden" name="prefix" value="{{ r.material_prefix }}">
           <td class="px-3 py-2 font-mono align-top">{{ r.material_prefix }}</td>
-          <td class="px-3 py-2 text-slate-600 align-top">{{ r.bike_models or '—' }}</td>
+          <td class="px-3 py-2 text-slate-600 align-top">
+            {% if r.bike_supers %}<div class="text-xs text-slate-400">{{ r.bike_supers }}</div>{% endif %}
+            <div>{{ r.bike_models or '—' }}</div>
+          </td>
           <td class="px-3 py-2 align-top">{{ r.order_count }}</td>
           <td class="px-3 py-2 align-top">
             <select name="plan_combo" class="border border-slate-300 rounded px-2 py-1 text-sm">
