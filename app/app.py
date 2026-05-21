@@ -832,6 +832,42 @@ def admin_mapping_delete():
     return redirect(url_for("admin_mapping"))
 
 
+@app.route("/admin/mapping/dump", methods=["GET"])
+@admin_required
+def admin_mapping_dump():
+    """Plain-text dump of the mapping table for debugging the auto-suggester.
+    One row per material_prefix; cells separated by ' | '."""
+    from flask import Response
+    con = db.get_conn()
+    rows = con.execute(
+        f"SELECT mm.material_prefix, mm.status, "
+        f"  mm.plan_super, mm.plan_model, "
+        f"  mm.proposed_plan_super, mm.proposed_plan_model, "
+        f"  (SELECT {db.group_concat_distinct('bike_super_model')} FROM orders o "
+        f"     WHERE o.material_prefix = mm.material_prefix) AS bike_supers, "
+        f"  (SELECT {db.group_concat_distinct('bike_model')} FROM orders o "
+        f"     WHERE o.material_prefix = mm.material_prefix) AS bike_models "
+        f"FROM material_map mm "
+        f"ORDER BY CASE status WHEN 'unmapped' THEN 0 WHEN 'active' THEN 1 ELSE 2 END, "
+        f"mm.material_prefix"
+    ).fetchall()
+    header = ("prefix | status | plan_super | plan_model | "
+              "proposed_super | proposed_model | bike_supers | bike_models")
+    lines = [header, "-" * len(header)]
+    for r in rows:
+        lines.append(" | ".join([
+            r["material_prefix"] or "",
+            r["status"] or "",
+            r["plan_super"] or "",
+            r["plan_model"] or "",
+            r["proposed_plan_super"] or "",
+            r["proposed_plan_model"] or "",
+            r["bike_supers"] or "",
+            r["bike_models"] or "",
+        ]))
+    return Response("\n".join(lines), mimetype="text/plain")
+
+
 @app.route("/admin/mapping/reset", methods=["POST"])
 @admin_required
 def admin_mapping_reset():
