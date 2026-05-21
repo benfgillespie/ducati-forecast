@@ -478,56 +478,73 @@ def _auto_suggest_mappings():
             if match:
                 break
 
-        # Tier 3: substring match. For each (bs, bm), find plan_models whose
-        # normalized form is a substring of the normalized bike_model (or
-        # vice versa). Restrict to plans whose super matches the bike super
-        # when both are present, to avoid cross-family false positives. Pick
-        # the longest matching plan_model name — it's the most specific.
+        # Tier 3: substring match. Two cases:
+        #   A) plan ⊂ bike  — the plan rolls up a specific bike. Want the
+        #      LONGEST plan that fits in the bike (most informative).
+        #   B) bike ⊂ plan  — the plan name has extra suffixes (gen markers,
+        #      special editions). Want the SHORTEST plan that contains the
+        #      bike — picking the longest would silently upgrade 'Nightshift'
+        #      to 'Nightshift Centenario'.
+        # Candidate plan set is scoped by super: prefer plans whose super
+        # exactly matches the bike super; only fall back to loose-super
+        # plans if no exact-super candidate exists. This avoids cases where
+        # the same model exists under two supers (e.g. 'Panigale' and
+        # 'Panigale V4') and would otherwise be ambiguous.
+        _MIN_SUBSTR_LEN = 3
         if match is None:
             for o in orders:
                 bs = o["bike_super_model"]
                 bm = o["bike_model"]
                 bs_norm = _norm(bs)
-                # Decide candidate plan set: those with a matching super, OR
-                # all plans if bike has no super.
-                candidate_plans = set()
-                if bs_norm:
-                    # Match plans whose super normalizes to a prefix of the
-                    # bike super or vice versa (so 'Panigale V4' bike super
-                    # matches plan super 'Panigale').
-                    for plan_super_norm, plans in super_index.items():
-                        if not plan_super_norm:
-                            continue
-                        if (plan_super_norm in bs_norm
-                                or bs_norm in plan_super_norm):
-                            candidate_plans |= plans
-                if not candidate_plans:
-                    candidate_plans = all_plans
+
+                exact_super_plans = set()
+                loose_super_plans = set()
+                for plan_super_norm, plans in super_index.items():
+                    if not plan_super_norm or not bs_norm:
+                        continue
+                    if plan_super_norm == bs_norm:
+                        exact_super_plans |= plans
+                    elif (plan_super_norm in bs_norm
+                          or bs_norm in plan_super_norm):
+                        loose_super_plans |= plans
+                candidate_plans = (exact_super_plans
+                                   or loose_super_plans
+                                   or all_plans)
 
                 for bm_variant in _name_variants(bm):
                     bm_norm = _norm(bm_variant)
-                    if len(bm_norm) < 4:
+                    if len(bm_norm) < _MIN_SUBSTR_LEN:
                         continue
-                    hits = []
+                    a_hits = []  # plan ⊂ bike — longest wins
+                    b_hits = []  # bike ⊂ plan — shortest wins
                     for ps, pm in candidate_plans:
                         for pm_variant in _name_variants(pm):
                             pm_norm = _norm(pm_variant)
-                            if len(pm_norm) < 4:
+                            if len(pm_norm) < _MIN_SUBSTR_LEN:
                                 continue
-                            if pm_norm in bm_norm or bm_norm in pm_norm:
-                                hits.append((len(pm_norm), ps, pm))
+                            if pm_norm == bm_norm:
+                                a_hits.append((len(pm_norm), ps, pm))
                                 break
-                    if not hits:
-                        continue
-                    hits.sort(reverse=True)  # longest plan_model first
-                    # Accept only if the top hit is strictly the most
-                    # specific — i.e. not tied with another candidate of
-                    # the same length but different (ps, pm).
-                    top_len = hits[0][0]
-                    top_set = {(h[1], h[2]) for h in hits if h[0] == top_len}
-                    if len(top_set) == 1:
-                        match = top_set.pop()
-                        break
+                            if pm_norm in bm_norm:
+                                a_hits.append((len(pm_norm), ps, pm))
+                                break
+                            if bm_norm in pm_norm:
+                                b_hits.append((len(pm_norm), ps, pm))
+                                break
+                    if a_hits:
+                        a_hits.sort(reverse=True)  # longest first
+                        top_len = a_hits[0][0]
+                        top_set = {(h[1], h[2]) for h in a_hits if h[0] == top_len}
+                        if len(top_set) == 1:
+                            match = top_set.pop()
+                            break
+                    if b_hits:
+                        b_hits.sort()  # shortest first
+                        top_len = b_hits[0][0]
+                        top_set = {(h[1], h[2]) for h in b_hits if h[0] == top_len}
+                        if len(top_set) == 1:
+                            match = top_set.pop()
+                            break
                 if match:
                     break
 
