@@ -123,6 +123,59 @@ def _to_iso_date(v):
         return str(v)
 
 
+def parse_allocations(path):
+    """Yield allocation dicts from the Allocations workbook.
+
+    The Allocations sheet has the same column structure as the orders Export
+    sheet but is sometimes shifted one column right (a leading sequential ID
+    column) and may contain blank separator rows. We auto-detect the column
+    offset by finding 'Order Number' in the header row, so both layouts
+    work."""
+    wb = load_workbook(path, data_only=True, read_only=True)
+    ws = wb.active  # Allocations file we've seen uses 'Sheet1', not 'Export'
+    out = []
+    header_offset = None
+    for row in ws.iter_rows(values_only=True):
+        if header_offset is None:
+            # Locate 'Order Number' in the header — that's column 0 of the
+            # canonical Export layout, so its position tells us the offset.
+            for i, v in enumerate(row):
+                if v and str(v).strip().lower() == "order number":
+                    header_offset = i
+                    break
+            if header_offset is None:
+                # No header on this row; keep scanning until we find one.
+                continue
+            continue
+        # Skip entirely-blank rows.
+        if not any(row):
+            continue
+        # Slice off the leading filler columns, then unpack like Export.
+        payload = (row[header_offset:] + (None,) * 18)[:18]
+        (order_number, _mat_code, material, super_model, bike_model,
+         _bike_color, _bike_type, _ec_status, _ec_date, _request_date,
+         _po_number, _status_group, country_raw, _dealer, dealer_code,
+         _customer, _order_create_date, _confirmed_delivery_date) = payload
+
+        if not material and not order_number:
+            continue
+
+        out.append({
+            "order_number": str(order_number) if order_number else None,
+            "material_prefix": extract_material_prefix(material),
+            "material_full": str(material) if material else None,
+            "bike_super_model": super_model,
+            "bike_model": bike_model,
+            "country": COUNTRY_FROM_ORDER.get(
+                str(country_raw).strip().upper() if country_raw else "",
+                country_raw,
+            ),
+            "dealer_code": str(dealer_code) if dealer_code else None,
+        })
+    wb.close()
+    return out
+
+
 def parse_orders(path):
     """Yield order dicts from the Export sheet, filtered to open orders."""
     wb = load_workbook(path, data_only=True, read_only=True)

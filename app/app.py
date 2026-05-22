@@ -227,6 +227,17 @@ def _render_dealer(dealer):
         "ORDER BY COALESCE(o.order_creation_date, '9999-12-31'), o.material_prefix"
     ).fetchall()
 
+    # Allocations: bikes already delivered (off the orders sheet) — counted as
+    # consumed from forecast capacity, off the FRONT of the queue.
+    allocation_counts = con.execute(
+        "SELECT mm.plan_model, COUNT(a.id) AS n "
+        "FROM allocations a "
+        "JOIN material_map mm ON mm.material_prefix = a.material_prefix "
+        "WHERE a.country IN ('UK','SWE','NOR') "
+        "GROUP BY mm.plan_model"
+    ).fetchall()
+    alloc_total = {r["plan_model"]: r["n"] for r in allocation_counts if r["plan_model"]}
+
     # Embargoed plan models — hide entirely from dealer view.
     embargoed = {r["plan_model"] for r in con.execute(
         f"SELECT plan_model FROM embargoes "
@@ -234,13 +245,15 @@ def _render_dealer(dealer):
     ).fetchall()}
 
     # Join orders to plan rows by plan_model only.
-    grid = {}        # plan_model -> {(y,m): {forecast, committed}}
+    grid = {}        # plan_model -> {(y,m): {forecast, allocated, committed}}
     super_for = {}   # plan_model -> representative plan_super (display only)
     queue_for = {}   # plan_model -> list of orders to allocate (in creation-date order)
 
     for r in plan_rows:
         key = r["plan_model"]
-        grid.setdefault(key, {})[(r["year"], r["month"])] = {"forecast": r["qty"], "committed": 0}
+        grid.setdefault(key, {})[(r["year"], r["month"])] = {
+            "forecast": r["qty"], "allocated": 0, "committed": 0,
+        }
         super_for.setdefault(key, r["plan_super"])
 
     unmapped_orders = 0
@@ -252,18 +265,36 @@ def _render_dealer(dealer):
         queue_for.setdefault(r["plan_model"], []).append(None)  # 1 token per order; FIFO is by SQL order
 
     # Ensure every month in the window has a cell, even for models with no plan forecast.
-    for p_model in set(grid) | set(queue_for):
+    for p_model in set(grid) | set(queue_for) | set(alloc_total):
         monthly = grid.setdefault(p_model, {})
         for ym in months_keys:
-            monthly.setdefault(ym, {"forecast": 0, "committed": 0})
+            monthly.setdefault(ym, {"forecast": 0, "allocated": 0, "committed": 0})
 
-    # Allocate orders FIFO (by creation date) into the first month with remaining capacity.
-    # Every committed order (demo + customer) consumes one slot; ignore confirmed delivery date.
+    # First: assign allocations (delivered bikes) chronologically off the front
+    # of the forecast. Excess beyond total forecast piles up on the last month,
+    # producing a negative available number — signalling overcommit.
+    for p_model, monthly in grid.items():
+        remaining = alloc_total.get(p_model, 0)
+        for ym in months_keys:
+            if remaining <= 0:
+                break
+            cap = monthly[ym]["forecast"]
+            take = min(cap, remaining) if cap > 0 else 0
+            monthly[ym]["allocated"] = take
+            remaining -= take
+        if remaining > 0:
+            monthly[months_keys[-1]]["allocated"] += remaining
+
+    # Then: allocate open orders FIFO into the first month with remaining
+    # capacity AFTER allocations. Overflow piles onto the last month.
     for p_model, monthly in grid.items():
         for _ in queue_for.get(p_model, []):
             placed = False
             for ym in months_keys:
-                if monthly[ym]["forecast"] - monthly[ym]["committed"] > 0:
+                free = (monthly[ym]["forecast"]
+                        - monthly[ym]["allocated"]
+                        - monthly[ym]["committed"])
+                if free > 0:
                     monthly[ym]["committed"] += 1
                     placed = True
                     break
@@ -277,10 +308,15 @@ def _render_dealer(dealer):
         cells = []
         soonest = None
         for ym in months_keys:
-            d = monthly.get(ym, {"forecast": 0, "committed": 0})
-            available = d["forecast"] - d["committed"]
-            cells.append({"year": ym[0], "month": ym[1], "forecast": d["forecast"],
-                          "committed": d["committed"], "available": available})
+            d = monthly.get(ym, {"forecast": 0, "allocated": 0, "committed": 0})
+            available = d["forecast"] - d["allocated"] - d["committed"]
+            cells.append({
+                "year": ym[0], "month": ym[1],
+                "forecast": d["forecast"],
+                "allocated": d["allocated"],
+                "committed": d["committed"],
+                "available": available,
+            })
             if soonest is None and available >= 1:
                 soonest = ym
         rows.append({"plan_super": super_for.get(p_model), "plan_model": p_model,
@@ -329,6 +365,40 @@ def _latest_orders_import():
         "SELECT id, imported_at, orders_filename, order_rows FROM imports "
         "WHERE orders_filename IS NOT NULL ORDER BY id DESC LIMIT 1"
     ).fetchone()
+
+
+def _latest_allocations_report():
+    """Most recent allocations upload (or None if there's never been one)."""
+    return db.get_conn().execute(
+        "SELECT id, report_date, uploaded_at, filename, row_count "
+        "FROM allocation_reports ORDER BY report_date DESC, id DESC LIMIT 1"
+    ).fetchone()
+
+
+# Allocations filename convention: "Allocations DD.MM.YY (am|pm).xlsx".
+# Captures date + period; combined into a sortable "YYYY-MM-DD AM/PM" string.
+_ALLOC_FILENAME_RE = re.compile(
+    r"(?i)allocations\s+(\d{1,2})[.](\d{1,2})[.](\d{2,4})\s+(am|pm)",
+)
+
+
+def _parse_allocations_report_date(filename):
+    """Return 'YYYY-MM-DD AM' or 'YYYY-MM-DD PM' if the filename matches
+    the convention, else None. The caller can prompt the admin for a date
+    if this returns None."""
+    if not filename:
+        return None
+    m = _ALLOC_FILENAME_RE.search(filename)
+    if not m:
+        return None
+    day, month, year_raw, period = m.groups()
+    year = int(year_raw)
+    if year < 100:
+        year += 2000
+    try:
+        return f"{year:04d}-{int(month):02d}-{int(day):02d} {period.upper()}"
+    except ValueError:
+        return None
 
 
 # Material-prefix → plan-model auto-suggestion. Proposals are written to
@@ -565,6 +635,7 @@ def admin_home():
     con = db.get_conn()
     last_plan = _latest_plan_import()
     last_orders = _latest_orders_import()
+    last_allocations = _latest_allocations_report()
     last_any = con.execute(
         "SELECT imported_at FROM imports ORDER BY id DESC LIMIT 1"
     ).fetchone()
@@ -602,6 +673,7 @@ def admin_home():
         "admin_home.html",
         last_plan=last_plan,
         last_orders=last_orders,
+        last_allocations=last_allocations,
         last_any_at=last_any["imported_at"] if last_any else None,
         unmapped=unmapped,
         dealer_count=dealer_count,
@@ -662,14 +734,22 @@ def admin_upload():
             "admin_upload.html",
             last_plan=_latest_plan_import(),
             last_orders=_latest_orders_import(),
+            last_allocations=_latest_allocations_report(),
         )
 
     # Per-file action: "new" = upload a fresh file, "reuse" = keep what's in the DB.
     # Default to "new" if the form somehow doesn't send it.
     plan_action = (request.form.get("plan_action") or "new").strip()
     orders_action = (request.form.get("orders_action") or "new").strip()
+    allocations_action = (request.form.get("allocations_action") or "reuse").strip()
     plan_file = request.files.get("plan_file") if plan_action == "new" else None
     orders_file = request.files.get("orders_file") if orders_action == "new" else None
+    allocations_file = (request.files.get("allocations_file")
+                        if allocations_action == "new" else None)
+    # Allocations report date — derived from filename, with admin override field.
+    allocations_date_override = (request.form.get("allocations_date") or "").strip()
+
+    last_alloc = _latest_allocations_report()
 
     # Validate combinations.
     if plan_action == "reuse" and not _latest_plan_import():
@@ -678,24 +758,62 @@ def admin_upload():
     if orders_action == "reuse" and not _latest_orders_import():
         flash("Can't reuse orders data — none has ever been uploaded.", "error")
         return redirect(url_for("admin_upload"))
+    if allocations_action == "reuse" and not last_alloc:
+        # No previous allocations is fine — treat reuse as "no allocations yet".
+        # Just continue without doing anything for that file.
+        pass
     if plan_action == "new" and (not plan_file or not plan_file.filename):
         flash("Plan file not attached.", "error")
         return redirect(url_for("admin_upload"))
     if orders_action == "new" and (not orders_file or not orders_file.filename):
         flash("Orders file not attached.", "error")
         return redirect(url_for("admin_upload"))
-    if plan_action == "reuse" and orders_action == "reuse":
+    if allocations_action == "new" and (not allocations_file
+                                        or not allocations_file.filename):
+        flash("Allocations file not attached.", "error")
+        return redirect(url_for("admin_upload"))
+    if (plan_action == "reuse" and orders_action == "reuse"
+            and allocations_action != "new"):
         flash("Nothing to import — choose at least one file to refresh.", "error")
         return redirect(url_for("admin_upload"))
+
+    # Resolve the allocations report date when a new file is being uploaded.
+    allocations_report_date = None
+    if allocations_file is not None:
+        # Filename wins by default; admin can override via the form field.
+        from_filename = _parse_allocations_report_date(allocations_file.filename)
+        allocations_report_date = allocations_date_override or from_filename
+        if not allocations_report_date:
+            flash(
+                "Couldn't read a report date from the allocations filename "
+                "(expected 'Allocations DD.MM.YY am|pm.xlsx'). "
+                "Type one into the date field and resubmit.",
+                "error",
+            )
+            return redirect(url_for("admin_upload"))
+        if last_alloc and allocations_report_date < last_alloc["report_date"]:
+            flash(
+                f"Allocations file is older than the current snapshot "
+                f"({last_alloc['report_date']}). Upload skipped to avoid "
+                f"rolling back. If this is intentional, override the date "
+                f"to a newer one.",
+                "error",
+            )
+            return redirect(url_for("admin_upload"))
 
     # Parse only the side(s) the user is refreshing.
     plan_rows = None
     order_rows = None
+    allocation_rows = None
     try:
         if plan_file is not None:
             plan_rows = parsers.parse_plan(io.BytesIO(plan_file.stream.read()))
         if orders_file is not None:
             order_rows = parsers.parse_orders(io.BytesIO(orders_file.stream.read()))
+        if allocations_file is not None:
+            allocation_rows = parsers.parse_allocations(
+                io.BytesIO(allocations_file.stream.read())
+            )
     except Exception as e:
         flash(f"Parse failed: {e}", "error")
         return redirect(url_for("admin_upload"))
@@ -762,6 +880,24 @@ def admin_upload():
                 (p,),
             )
 
+    # Allocations side.
+    if allocation_rows is not None and allocations_file is not None:
+        con.execute("DELETE FROM allocations")
+        con.executemany(
+            "INSERT INTO allocations(order_number, material_prefix, material_full, "
+            "bike_super_model, bike_model, country, dealer_code) "
+            "VALUES(:order_number,:material_prefix,:material_full,"
+            ":bike_super_model,:bike_model,:country,:dealer_code)",
+            allocation_rows,
+        )
+        con.execute(
+            "INSERT INTO allocation_reports(report_date, filename, row_count) "
+            "VALUES(?,?,?)",
+            (allocations_report_date,
+             allocations_file.filename,
+             len(allocation_rows)),
+        )
+
     # Auto-suggest mappings for unmapped prefixes. Cheap to always run — picks
     # up new prefixes from an orders refresh AND new matches enabled by a plan
     # refresh. Suggestions are proposals only; the admin still confirms.
@@ -794,6 +930,12 @@ def admin_upload():
         parts.append(f"{len(order_rows)} orders")
     else:
         parts.append("orders reused")
+    if allocation_rows is not None:
+        parts.append(f"{len(allocation_rows)} allocations ({allocations_report_date})")
+    elif last_alloc:
+        parts.append("allocations reused")
+    else:
+        parts.append("no allocations")
     msg = "Imported: " + ", ".join(parts) + "."
     if new_prefixes:
         msg += f" {len(new_prefixes)} new Material prefix(es) detected."

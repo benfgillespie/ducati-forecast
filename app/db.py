@@ -124,6 +124,24 @@ CREATE TABLE IF NOT EXISTS material_map_backups (
     row_count INTEGER NOT NULL DEFAULT 0,
     payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS allocations (
+    id INTEGER PRIMARY KEY,
+    material_prefix TEXT,
+    material_full TEXT,
+    bike_super_model TEXT,
+    bike_model TEXT,
+    country TEXT,
+    order_number TEXT,
+    dealer_code TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_allocations_lookup ON allocations(country, material_prefix);
+CREATE TABLE IF NOT EXISTS allocation_reports (
+    id INTEGER PRIMARY KEY,
+    report_date TEXT NOT NULL,
+    uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    filename TEXT,
+    row_count INTEGER NOT NULL DEFAULT 0
+);
 """
 
 _POSTGRES_SCHEMA = """
@@ -207,6 +225,24 @@ CREATE TABLE IF NOT EXISTS material_map_backups (
     label TEXT,
     row_count INTEGER NOT NULL DEFAULT 0,
     payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS allocations (
+    id BIGSERIAL PRIMARY KEY,
+    material_prefix TEXT,
+    material_full TEXT,
+    bike_super_model TEXT,
+    bike_model TEXT,
+    country TEXT,
+    order_number TEXT,
+    dealer_code TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_allocations_lookup ON allocations(country, material_prefix);
+CREATE TABLE IF NOT EXISTS allocation_reports (
+    id BIGSERIAL PRIMARY KEY,
+    report_date TEXT NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    filename TEXT,
+    row_count INTEGER NOT NULL DEFAULT 0
 );
 """
 

@@ -96,6 +96,15 @@
           <span class="text-slate-400">none yet</span>
         {% endif %}
       </div>
+      <div>Allocations:
+        {% if last_allocations %}
+          <span class="font-mono text-xs">{{ last_allocations.filename }}</span>
+          — {{ last_allocations.row_count }} rows
+          <span class="text-xs text-slate-400">(report {{ last_allocations.report_date }}, uploaded {{ last_allocations.uploaded_at }})</span>
+        {% else %}
+          <span class="text-slate-400">none yet</span>
+        {% endif %}
+      </div>
     </div>
   {% else %}
     <p class="text-sm text-slate-500">No data has been uploaded yet.</p>

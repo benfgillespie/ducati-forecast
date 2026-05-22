@@ -42,7 +42,8 @@
         </td>
         {% for cell in r.cells %}
           {% set v = cell.available %}
-          <td class="px-2 py-2 text-center align-middle">
+          <td class="px-2 py-2 text-center align-middle"
+              title="forecast {{ cell.forecast }} − allocated {{ cell.allocated }} − committed {{ cell.committed }} = {{ v }}">
             <span class="inline-block w-3 h-3 rounded-full
                          {% if v >= 10 %}bg-emerald-500
                          {% elif v >= 1 %}bg-amber-400

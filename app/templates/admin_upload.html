@@ -63,6 +63,47 @@
       </label>
     </fieldset>
 
+    <!-- Allocations -->
+    <fieldset class="border border-slate-200 rounded p-4">
+      <legend class="text-sm font-medium px-2">Allocations</legend>
+      <p class="text-xs text-slate-500 mb-3">
+        Bikes already delivered (off the orders sheet) — used to reduce the
+        forecast off the front of the queue. Replaces the previous snapshot;
+        an older-dated file will be rejected.
+      </p>
+      <label class="flex items-start gap-2 mb-2 text-sm">
+        <input type="radio" name="allocations_action" value="new" class="mt-1"
+               {% if not last_allocations %}checked{% endif %}
+               onchange="document.getElementById('alloc-file-row').classList.remove('hidden')">
+        <span>Upload a new file</span>
+      </label>
+      <div id="alloc-file-row" class="ml-6 mb-3 {% if last_allocations %}hidden{% endif %}">
+        <input type="file" name="allocations_file" accept=".xlsx" class="block w-full text-sm">
+        <p class="text-xs text-slate-400 mt-1">Filename pattern: <code>Allocations DD.MM.YY (am|pm).xlsx</code></p>
+        <label class="block text-xs text-slate-500 mt-2">
+          Report date override
+          <input type="text" name="allocations_date"
+                 placeholder="YYYY-MM-DD AM/PM (leave blank to use filename)"
+                 class="block w-full mt-1 border border-slate-300 rounded px-2 py-1 text-sm">
+        </label>
+      </div>
+      <label class="flex items-start gap-2 text-sm {% if not last_allocations %}opacity-50{% endif %}">
+        <input type="radio" name="allocations_action" value="reuse" class="mt-1"
+               {% if last_allocations %}checked{% endif %}
+               {% if not last_allocations %}disabled{% endif %}
+               onchange="document.getElementById('alloc-file-row').classList.add('hidden')">
+        <span>
+          Reuse last upload
+          {% if last_allocations %}
+            — <span class="font-mono text-xs">{{ last_allocations.filename }}</span>
+            <span class="text-xs text-slate-400">({{ last_allocations.row_count }} rows, report {{ last_allocations.report_date }})</span>
+          {% else %}
+            <span class="text-xs text-slate-400">(no previous upload)</span>
+          {% endif %}
+        </span>
+      </label>
+    </fieldset>
+
     <button class="bg-slate-800 text-white rounded px-4 py-2 hover:bg-slate-700">Parse &amp; publish</button>
   </form>
 </div>
