@@ -71,7 +71,12 @@
         forecast off the front of the queue.
         <strong>Cumulative</strong>: each upload adds new rows, deduped by
         order number. Uploading a new <em>plan</em> wipes allocations to
-        start a fresh period. Older-dated allocation files are rejected.
+        start a fresh period.
+        Accepts either a single-period file (filename pattern
+        <code>Allocations DD.MM.YY am|pm.xlsx</code>) or a master workbook
+        whose sheets are named per period (<code>DD.MM.YY am|pm</code>) —
+        the system ingests every dated sheet chronologically and dedups
+        across them. Older-dated single-period files are rejected.
       </p>
       <label class="flex items-start gap-2 mb-2 text-sm">
         <input type="radio" name="allocations_action" value="new" class="mt-1"

@@ -375,30 +375,11 @@ def _latest_allocations_report():
     ).fetchone()
 
 
-# Allocations filename convention: "Allocations DD.MM.YY (am|pm).xlsx".
-# Captures date + period; combined into a sortable "YYYY-MM-DD AM/PM" string.
-_ALLOC_FILENAME_RE = re.compile(
-    r"(?i)allocations\s+(\d{1,2})[.](\d{1,2})[.](\d{2,4})\s+(am|pm)",
-)
-
-
-def _parse_allocations_report_date(filename):
-    """Return 'YYYY-MM-DD AM' or 'YYYY-MM-DD PM' if the filename matches
-    the convention, else None. The caller can prompt the admin for a date
-    if this returns None."""
-    if not filename:
-        return None
-    m = _ALLOC_FILENAME_RE.search(filename)
-    if not m:
-        return None
-    day, month, year_raw, period = m.groups()
-    year = int(year_raw)
-    if year < 100:
-        year += 2000
-    try:
-        return f"{year:04d}-{int(month):02d}-{int(day):02d} {period.upper()}"
-    except ValueError:
-        return None
+# Allocations report-date is resolved either from a sheet name (master
+# workbook) or from the filename (single-period daily file). The shared
+# parser helper handles both.
+def _parse_allocations_report_date(text):
+    return parsers.parse_period_text(text)
 
 
 def _ingest_allocations(allocation_rows, report_date, filename):
@@ -805,44 +786,75 @@ def api_allocations_ingest():
             "detail": "No .xlsx attachment found in request.files",
         }), 400
 
-    # Report date: filename first, allow override via form/json.
+    # Optional date override via form/json — applied when a sheet has no
+    # date in its own name and the filename also doesn't match.
     override = (request.form.get("report_date")
                 or (request.get_json(silent=True) or {}).get("report_date")
                 or "").strip()
-    report_date = override or _parse_allocations_report_date(upload.filename)
-    if not report_date:
-        return jsonify({
-            "status": "bad_date",
-            "detail": ("Couldn't parse report_date from filename "
-                       f"'{upload.filename}' (expected "
-                       "'Allocations DD.MM.YY am|pm.xlsx'). "
-                       "Pass `report_date` form/JSON field to override."),
-        }), 400
-
-    last = _latest_allocations_report()
-    if last and report_date < last["report_date"]:
-        return jsonify({
-            "status": "rejected_older",
-            "current": last["report_date"],
-            "attempted": report_date,
-            "filename": upload.filename,
-        }), 200
 
     try:
-        allocation_rows = parsers.parse_allocations(io.BytesIO(upload.stream.read()))
+        sheets = parsers.parse_allocations(io.BytesIO(upload.stream.read()))
     except Exception as e:
         return jsonify({
             "status": "parse_failed",
             "detail": f"{type(e).__name__}: {e}",
         }), 400
 
-    added, skipped = _ingest_allocations(allocation_rows, report_date, upload.filename)
+    if not sheets:
+        return jsonify({
+            "status": "no_data",
+            "detail": "Workbook had no allocation rows.",
+        }), 400
+
+    filename_date = _parse_allocations_report_date(upload.filename)
+    resolved = []
+    for sheet_name, sheet_date, rows in sheets:
+        effective_date = sheet_date or override or filename_date
+        if not effective_date:
+            return jsonify({
+                "status": "bad_date",
+                "detail": (f"Couldn't parse report_date for sheet "
+                           f"'{sheet_name}'. Filename '{upload.filename}' "
+                           f"doesn't match 'Allocations DD.MM.YY am|pm.xlsx' "
+                           f"either. Send a `report_date` field to override."),
+            }), 400
+        resolved.append((sheet_name, effective_date, rows))
+    resolved.sort(key=lambda x: x[1])
+
+    # Single-sheet older-date rejection (same defensive net as the admin
+    # upload). Multi-sheet uploads bypass this — backfilling history is a
+    # legitimate use of the ingest endpoint too.
+    last = _latest_allocations_report()
+    if len(resolved) == 1 and last and resolved[0][1] < last["report_date"]:
+        return jsonify({
+            "status": "rejected_older",
+            "current": last["report_date"],
+            "attempted": resolved[0][1],
+            "filename": upload.filename,
+        }), 200
+
+    total_added = 0
+    total_skipped = 0
+    sheet_summaries = []
+    for sheet_name, effective_date, rows in resolved:
+        label = (upload.filename
+                 if len(resolved) == 1
+                 else f"{upload.filename} [{sheet_name}]")
+        added, skipped = _ingest_allocations(rows, effective_date, label)
+        total_added += added
+        total_skipped += skipped
+        sheet_summaries.append({
+            "report_date": effective_date,
+            "added": added,
+            "skipped": skipped,
+        })
     db.get_conn().commit()
     return jsonify({
         "status": "ok",
-        "added": added,
-        "skipped": skipped,
-        "report_date": report_date,
+        "added": total_added,
+        "skipped": total_skipped,
+        "sheets": sheet_summaries,
+        "report_date": resolved[-1][1],
         "filename": upload.filename,
     })
 
@@ -900,46 +912,64 @@ def admin_upload():
         flash("Nothing to import — choose at least one file to refresh.", "error")
         return redirect(url_for("admin_upload"))
 
-    # Resolve the allocations report date when a new file is being uploaded.
-    allocations_report_date = None
-    if allocations_file is not None:
-        # Filename wins by default; admin can override via the form field.
-        from_filename = _parse_allocations_report_date(allocations_file.filename)
-        allocations_report_date = allocations_date_override or from_filename
-        if not allocations_report_date:
-            flash(
-                "Couldn't read a report date from the allocations filename "
-                "(expected 'Allocations DD.MM.YY am|pm.xlsx'). "
-                "Type one into the date field and resubmit.",
-                "error",
-            )
-            return redirect(url_for("admin_upload"))
-        if last_alloc and allocations_report_date < last_alloc["report_date"]:
-            flash(
-                f"Allocations file is older than the current snapshot "
-                f"({last_alloc['report_date']}). Upload skipped to avoid "
-                f"rolling back. If this is intentional, override the date "
-                f"to a newer one.",
-                "error",
-            )
-            return redirect(url_for("admin_upload"))
-
     # Parse only the side(s) the user is refreshing.
     plan_rows = None
     order_rows = None
-    allocation_rows = None
+    allocation_sheets = None
     try:
         if plan_file is not None:
             plan_rows = parsers.parse_plan(io.BytesIO(plan_file.stream.read()))
         if orders_file is not None:
             order_rows = parsers.parse_orders(io.BytesIO(orders_file.stream.read()))
         if allocations_file is not None:
-            allocation_rows = parsers.parse_allocations(
+            # List of (sheet_name, sheet_report_date_or_None, rows).
+            allocation_sheets = parsers.parse_allocations(
                 io.BytesIO(allocations_file.stream.read())
             )
     except Exception as e:
         flash(f"Parse failed: {e}", "error")
         return redirect(url_for("admin_upload"))
+
+    # Resolve effective report dates for each allocations sheet. Sheet-name
+    # dates win (master workbook); otherwise fall back to the filename, then
+    # the admin override. For multi-sheet files we skip the older-date
+    # rejection — backfilling old periods is a legitimate use of master
+    # uploads, and the order_number dedup makes it safe.
+    resolved_sheets = []
+    if allocation_sheets is not None and allocations_file is not None:
+        if not allocation_sheets:
+            flash("Allocations workbook had no data sheets.", "error")
+            return redirect(url_for("admin_upload"))
+        filename_date = _parse_allocations_report_date(allocations_file.filename)
+        for sheet_name, sheet_date, rows in allocation_sheets:
+            effective_date = (sheet_date
+                              or allocations_date_override
+                              or filename_date)
+            if not effective_date:
+                flash(
+                    f"Couldn't read a report date for sheet '{sheet_name}'. "
+                    f"Rename it to 'DD.MM.YY am|pm', rename the file to "
+                    f"'Allocations DD.MM.YY am|pm.xlsx', or type a date "
+                    f"into the override field.",
+                    "error",
+                )
+                return redirect(url_for("admin_upload"))
+            resolved_sheets.append((sheet_name, effective_date, rows))
+        # Sort chronologically so the audit log timeline reads correctly.
+        resolved_sheets.sort(key=lambda x: x[1])
+        # Single-sheet upload: keep the older-date rejection as a sanity net
+        # against accidentally re-sending yesterday's file.
+        if len(resolved_sheets) == 1 and last_alloc:
+            only_date = resolved_sheets[0][1]
+            if only_date < last_alloc["report_date"]:
+                flash(
+                    f"Allocations file is older than the current snapshot "
+                    f"({last_alloc['report_date']}). Upload skipped to avoid "
+                    f"rolling back. If this is intentional, override the date "
+                    f"to a newer one.",
+                    "error",
+                )
+                return redirect(url_for("admin_upload"))
 
     con = db.get_conn()
 
@@ -1010,16 +1040,23 @@ def admin_upload():
                 (p,),
             )
 
-    # Allocations side. Append-only with order_number dedup — the sheet isn't
+    # Allocations side. Append-only with order_number dedup — each sheet isn't
     # cumulative but the DB needs to be, so each upload contributes only its
     # not-yet-seen rows. A new plan upload (above) wipes the table to start
     # the next accounting period fresh.
     allocations_added = 0
     allocations_skipped = 0
-    if allocation_rows is not None and allocations_file is not None:
-        allocations_added, allocations_skipped = _ingest_allocations(
-            allocation_rows, allocations_report_date, allocations_file.filename
-        )
+    if resolved_sheets and allocations_file is not None:
+        for sheet_name, effective_date, rows in resolved_sheets:
+            # Label the audit-log filename with the sheet name when we're
+            # ingesting more than one (so a master upload doesn't look like
+            # 28 identical rows in allocation_reports).
+            label = (allocations_file.filename
+                     if len(resolved_sheets) == 1
+                     else f"{allocations_file.filename} [{sheet_name}]")
+            added, skipped = _ingest_allocations(rows, effective_date, label)
+            allocations_added += added
+            allocations_skipped += skipped
 
     # Auto-suggest mappings for unmapped prefixes. Cheap to always run — picks
     # up new prefixes from an orders refresh AND new matches enabled by a plan
@@ -1053,11 +1090,17 @@ def admin_upload():
         parts.append(f"{len(order_rows)} orders")
     else:
         parts.append("orders reused")
-    if allocation_rows is not None:
+    if resolved_sheets:
         bits = [f"+{allocations_added} allocations"]
         if allocations_skipped:
             bits.append(f"{allocations_skipped} duplicate(s) skipped")
-        bits.append(f"report {allocations_report_date}")
+        if len(resolved_sheets) == 1:
+            bits.append(f"report {resolved_sheets[0][1]}")
+        else:
+            bits.append(
+                f"{len(resolved_sheets)} sheets, "
+                f"{resolved_sheets[0][1]} → {resolved_sheets[-1][1]}"
+            )
         parts.append(" ".join(bits))
     elif last_alloc:
         parts.append("allocations kept")

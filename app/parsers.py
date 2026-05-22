@@ -123,34 +123,74 @@ def _to_iso_date(v):
         return str(v)
 
 
-def parse_allocations(path):
-    """Yield allocation dicts from the Allocations workbook.
+_PERIOD_TEXT_RE = re.compile(
+    r"(?i)(?:allocations\s+)?(\d{1,2})[.](\d{1,2})[.](\d{2,4})\s+(am|pm)",
+)
 
-    The Allocations sheet has the same column structure as the orders Export
-    sheet but is sometimes shifted one column right (a leading sequential ID
-    column) and may contain blank separator rows. We auto-detect the column
-    offset by finding 'Order Number' in the header row, so both layouts
-    work."""
+
+def parse_period_text(text):
+    """Parse 'DD.MM.YY am|pm' (with or without an 'Allocations ' prefix)
+    into a sortable 'YYYY-MM-DD AM|PM' string. Returns None on miss.
+    Used for both Allocations filenames and master-workbook sheet names."""
+    if not text:
+        return None
+    m = _PERIOD_TEXT_RE.search(str(text))
+    if not m:
+        return None
+    day, month, year_raw, period = m.groups()
+    year = int(year_raw)
+    if year < 100:
+        year += 2000
+    try:
+        return f"{year:04d}-{int(month):02d}-{int(day):02d} {period.upper()}"
+    except ValueError:
+        return None
+
+
+def parse_allocations(path):
+    """Parse one or more allocation snapshots from a workbook.
+
+    Returns a list of (sheet_name, sheet_report_date_or_None, rows) tuples.
+    One tuple per non-empty sheet. Empty placeholder sheets are skipped.
+
+    - For a single-sheet daily file (one sheet typically named 'Sheet1'),
+      returns a list of length 1 with sheet_report_date=None; the caller
+      derives the report date from the filename or the admin override.
+    - For a master workbook with sheets named per period
+      ('DD.MM.YY am|pm'), each sheet's report_date is pre-parsed from
+      its name.
+
+    Each sheet's row layout is auto-detected by finding 'Order Number'
+    in the header, so both the Export layout and the master file's
+    leading-row-ID layout work without a flag."""
     wb = load_workbook(path, data_only=True, read_only=True)
-    ws = wb.active  # Allocations file we've seen uses 'Sheet1', not 'Export'
+    out = []
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        rows = _parse_allocations_sheet(ws)
+        if not rows:
+            continue
+        out.append((sheet_name, parse_period_text(sheet_name), rows))
+    wb.close()
+    return out
+
+
+def _parse_allocations_sheet(ws):
+    """Parse one sheet's worth of allocation rows. Returns list of dicts.
+    Empty list if the sheet has no header or no data."""
     out = []
     header_offset = None
     for row in ws.iter_rows(values_only=True):
         if header_offset is None:
-            # Locate 'Order Number' in the header — that's column 0 of the
-            # canonical Export layout, so its position tells us the offset.
             for i, v in enumerate(row):
                 if v and str(v).strip().lower() == "order number":
                     header_offset = i
                     break
             if header_offset is None:
-                # No header on this row; keep scanning until we find one.
                 continue
             continue
-        # Skip entirely-blank rows.
         if not any(row):
             continue
-        # Slice off the leading filler columns, then unpack like Export.
         payload = (row[header_offset:] + (None,) * 18)[:18]
         (order_number, _mat_code, material, super_model, bike_model,
          _bike_color, _bike_type, _ec_status, _ec_date, _request_date,
@@ -172,7 +212,6 @@ def parse_allocations(path):
             ),
             "dealer_code": str(dealer_code) if dealer_code else None,
         })
-    wb.close()
     return out
 
 

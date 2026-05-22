@@ -20,7 +20,7 @@
 </style>
 
 <h1>Dashboard README</h1>
-<p class="updated">Maintained: 2026-05-22 — features and status below reflect the current build.</p>
+<p class="updated">Maintained: 2026-05-22 (later) — features and status below reflect the current build.</p>
 
 <p>
   A small internal portal that shows dealers across the UK, Sweden and Norway when
@@ -49,7 +49,12 @@
 <ul>
   <li><strong>Plan workbook</strong> — typically refreshed monthly. Each upload <em>replaces</em> the plan and <em>wipes the allocations table</em> (a new plan = new accounting period).</li>
   <li><strong>Orders export</strong> — open orders only. Each upload replaces the orders table.</li>
-  <li><strong>Allocations</strong> — bikes already delivered and dropped off the orders sheet. <em>Cumulative</em> across uploads, deduped by order number. Twice-a-day cadence is expected.</li>
+  <li><strong>Allocations</strong> — bikes already delivered and dropped off the orders sheet. <em>Cumulative</em> across uploads, deduped by order number. Twice-a-day cadence is expected. Two file shapes are accepted:
+    <ul>
+      <li><strong>Single-period file</strong> — filename pattern <code>Allocations DD.MM.YY am|pm.xlsx</code>. The date is read from the filename.</li>
+      <li><strong>Master workbook</strong> — one sheet per period, sheet names like <code>22.05.26 pm</code>. The system walks every dated sheet chronologically and ingests each as its own report. Re-uploading a master is safe: dedup-by-order-number keeps the data clean.</li>
+    </ul>
+  </li>
 </ul>
 
 <h3>Availability math <span class="status-badge status-live">Live</span></h3>
