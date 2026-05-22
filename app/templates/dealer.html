@@ -28,10 +28,20 @@
     </thead>
     <tbody>
       {% for r in rows %}
-      <tr class="border-t border-slate-100">
+      {% set story_id = "story-" ~ loop.index %}
+      <tr class="border-t border-slate-100 cursor-pointer hover:bg-slate-50"
+          onclick="(function(el){
+            var s = document.getElementById('{{ story_id }}');
+            var c = document.getElementById('{{ story_id }}-chev');
+            if (s.classList.contains('hidden')) { s.classList.remove('hidden'); c.textContent = '▾'; }
+            else { s.classList.add('hidden'); c.textContent = '▸'; }
+          })(this); event.stopPropagation();">
         <td class="px-3 py-2 sticky left-0 bg-white">
-          <div class="font-medium">{{ r.plan_model }}</div>
-          <div class="text-xs text-slate-400">{{ r.plan_super }}</div>
+          <div class="font-medium flex items-center gap-1.5">
+            <span id="{{ story_id }}-chev" class="text-slate-400 text-xs select-none">▸</span>
+            <span>{{ r.plan_model }}</span>
+          </div>
+          <div class="text-xs text-slate-400 ml-4">{{ r.plan_super }}</div>
         </td>
         <td class="px-3 py-2 whitespace-nowrap">
           {% if r.soonest %}
@@ -51,6 +61,84 @@
             <span class="sr-only">{% if v >= 10 %}good{% elif v >= 1 %}limited{% else %}full{% endif %}</span>
           </td>
         {% endfor %}
+      </tr>
+      <tr id="{{ story_id }}" class="hidden bg-slate-50">
+        <td colspan="14" class="px-5 py-4 border-l-4 border-slate-300">
+          <div class="text-xs text-slate-500 mb-3">
+            <strong class="text-slate-700">{{ r.plan_model }}</strong>
+            <span class="text-slate-400">{{ r.plan_super }}</span>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4 mb-4 text-sm">
+            <div class="bg-white border border-slate-200 rounded p-3">
+              <div class="text-xs uppercase text-slate-500 tracking-wide mb-1">Material prefixes</div>
+              {% if r.story.prefixes %}
+                <div class="font-mono text-xs">{{ r.story.prefixes|join(', ') }}</div>
+              {% else %}
+                <div class="text-xs text-slate-400 italic">none mapped — this row's forecast has no orders or allocations feeding into it yet</div>
+              {% endif %}
+            </div>
+            <div class="bg-white border border-slate-200 rounded p-3">
+              <div class="text-xs uppercase text-slate-500 tracking-wide mb-1">12-month totals</div>
+              <div class="text-xs leading-relaxed">
+                Forecast: <span class="font-medium text-slate-700">{{ r.story.forecast_total }}</span><br>
+                − Allocated: <span class="font-medium text-slate-700">{{ r.story.allocated_total }}</span><br>
+                − Committed: <span class="font-medium text-slate-700">{{ r.story.committed_total }}</span><br>
+                = Available: <span class="font-medium {% if r.story.available_total < 0 %}text-rose-700{% else %}text-emerald-700{% endif %}">{{ r.story.available_total }}</span>
+              </div>
+            </div>
+            <div class="bg-white border border-slate-200 rounded p-3">
+              <div class="text-xs uppercase text-slate-500 tracking-wide mb-1">Breakdowns</div>
+              <div class="text-xs leading-relaxed">
+                <div class="text-slate-500">Allocated by country:</div>
+                {% if r.story.alloc_by_country %}
+                  {% for cc in ['UK','SWE','NOR'] %}
+                    {% if r.story.alloc_by_country.get(cc) %}
+                      <span class="inline-block mr-3">{{ cc }} <span class="font-medium text-slate-700">{{ r.story.alloc_by_country[cc] }}</span></span>
+                    {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <span class="italic text-slate-400">none</span>
+                {% endif %}
+                <div class="text-slate-500 mt-1">Committed by type:</div>
+                {% if r.story.committed_by_type %}
+                  {% for typ in ['End-customer','Demo','Courtesy'] %}
+                    {% if r.story.committed_by_type.get(typ) %}
+                      <span class="inline-block mr-3">{{ typ }} <span class="font-medium text-slate-700">{{ r.story.committed_by_type[typ] }}</span></span>
+                    {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <span class="italic text-slate-400">none</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white border border-slate-200 rounded overflow-x-auto">
+            <table class="text-xs w-full">
+              <thead class="bg-slate-100 text-slate-600">
+                <tr>
+                  <th class="text-left px-3 py-1.5">Month</th>
+                  <th class="text-right px-3 py-1.5">Forecast</th>
+                  <th class="text-right px-3 py-1.5">Allocated</th>
+                  <th class="text-right px-3 py-1.5">Committed</th>
+                  <th class="text-right px-3 py-1.5">Available</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for cell in r.cells %}
+                <tr class="border-t border-slate-100 {% if cell.forecast == 0 and cell.allocated == 0 and cell.committed == 0 %}text-slate-300{% endif %}">
+                  <td class="px-3 py-1">{{ month_names[cell.month-1] }} '{{ cell.year % 100 }}</td>
+                  <td class="px-3 py-1 text-right">{{ cell.forecast }}</td>
+                  <td class="px-3 py-1 text-right">{{ cell.allocated or '' }}</td>
+                  <td class="px-3 py-1 text-right">{{ cell.committed or '' }}</td>
+                  <td class="px-3 py-1 text-right font-medium {% if cell.available < 0 %}text-rose-700{% elif cell.available >= 10 %}text-emerald-700{% elif cell.available >= 1 %}text-amber-700{% else %}text-rose-700{% endif %}">{{ cell.available }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="14" class="px-3 py-6 text-center text-slate-500">

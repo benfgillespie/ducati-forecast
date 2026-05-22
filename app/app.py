@@ -229,14 +229,29 @@ def _render_dealer(dealer):
 
     # Allocations: bikes already delivered (off the orders sheet) — counted as
     # consumed from forecast capacity, off the FRONT of the queue.
-    allocation_counts = con.execute(
-        "SELECT mm.plan_model, COUNT(a.id) AS n "
+    allocation_rows_by_country = con.execute(
+        "SELECT mm.plan_model, a.country, COUNT(a.id) AS n "
         "FROM allocations a "
         "JOIN material_map mm ON mm.material_prefix = a.material_prefix "
-        "WHERE a.country IN ('UK','SWE','NOR') "
-        "GROUP BY mm.plan_model"
+        "WHERE a.country IN ('UK','SWE','NOR') AND mm.plan_model IS NOT NULL "
+        "GROUP BY mm.plan_model, a.country"
     ).fetchall()
-    alloc_total = {r["plan_model"]: r["n"] for r in allocation_counts if r["plan_model"]}
+    alloc_total = {}
+    alloc_by_country = {}   # plan_model -> {country: n}
+    for r in allocation_rows_by_country:
+        pm = r["plan_model"]
+        alloc_total[pm] = alloc_total.get(pm, 0) + r["n"]
+        alloc_by_country.setdefault(pm, {})[r["country"]] = r["n"]
+
+    # Material prefixes mapped to each plan_model — surfaces the join for
+    # the per-model story panel.
+    prefixes_per_model = {}
+    for r in con.execute(
+        "SELECT plan_model, material_prefix FROM material_map "
+        "WHERE plan_model IS NOT NULL AND status='active' "
+        "ORDER BY material_prefix"
+    ).fetchall():
+        prefixes_per_model.setdefault(r["plan_model"], []).append(r["material_prefix"])
 
     # Embargoed plan models — hide entirely from dealer view.
     embargoed = {r["plan_model"] for r in con.execute(
@@ -257,12 +272,23 @@ def _render_dealer(dealer):
         super_for.setdefault(key, r["plan_super"])
 
     unmapped_orders = 0
+    committed_by_type = {}  # plan_model -> {type: count}
     for r in order_rows:
         if not r["plan_model"]:
             unmapped_orders += 1
             continue
         super_for.setdefault(r["plan_model"], r["plan_super"])
         queue_for.setdefault(r["plan_model"], []).append(None)  # 1 token per order; FIFO is by SQL order
+        # Categorise for the per-model story panel. The WHERE clause above
+        # already ensures every row counts; we just need to label it
+        # without double-counting (bike_type wins when set; else End-customer).
+        bt = (r["bike_type"] or "").strip()
+        if bt in ("Demo", "Courtesy"):
+            label = bt
+        else:
+            label = "End-customer"
+        bucket = committed_by_type.setdefault(r["plan_model"], {})
+        bucket[label] = bucket.get(label, 0) + 1
 
     # Ensure every month in the window has a cell, even for models with no plan forecast.
     for p_model in set(grid) | set(queue_for) | set(alloc_total):
@@ -307,6 +333,9 @@ def _render_dealer(dealer):
             continue
         cells = []
         soonest = None
+        forecast_total = 0
+        allocated_total = 0
+        committed_total = 0
         for ym in months_keys:
             d = monthly.get(ym, {"forecast": 0, "allocated": 0, "committed": 0})
             available = d["forecast"] - d["allocated"] - d["committed"]
@@ -317,10 +346,22 @@ def _render_dealer(dealer):
                 "committed": d["committed"],
                 "available": available,
             })
+            forecast_total += d["forecast"]
+            allocated_total += d["allocated"]
+            committed_total += d["committed"]
             if soonest is None and available >= 1:
                 soonest = ym
+        story = {
+            "prefixes": prefixes_per_model.get(p_model, []),
+            "forecast_total": forecast_total,
+            "allocated_total": allocated_total,
+            "committed_total": committed_total,
+            "available_total": forecast_total - allocated_total - committed_total,
+            "alloc_by_country": alloc_by_country.get(p_model, {}),
+            "committed_by_type": committed_by_type.get(p_model, {}),
+        }
         rows.append({"plan_super": super_for.get(p_model), "plan_model": p_model,
-                     "cells": cells, "soonest": soonest})
+                     "cells": cells, "soonest": soonest, "story": story})
 
     # dealer's own committed orders (skipped for the synthetic admin preview)
     own_orders = []
