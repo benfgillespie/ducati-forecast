@@ -7,7 +7,7 @@ from datetime import date
 from functools import wraps
 
 from flask import (Flask, request, redirect, url_for, render_template,
-                   session, flash)
+                   session, flash, jsonify)
 
 from . import db
 from . import parsers
@@ -401,6 +401,43 @@ def _parse_allocations_report_date(filename):
         return None
 
 
+def _ingest_allocations(allocation_rows, report_date, filename):
+    """Append-only dedup-by-order_number insert. Writes a row to
+    allocation_reports. Caller is responsible for commit. Returns
+    (added, skipped)."""
+    con = db.get_conn()
+    existing = {
+        r["order_number"] for r in con.execute(
+            "SELECT order_number FROM allocations WHERE order_number IS NOT NULL"
+        ).fetchall()
+    }
+    rows_to_insert = []
+    seen_in_file = set()
+    skipped = 0
+    for row in allocation_rows:
+        on = row.get("order_number")
+        if on and (on in existing or on in seen_in_file):
+            skipped += 1
+            continue
+        if on:
+            seen_in_file.add(on)
+        rows_to_insert.append(row)
+    if rows_to_insert:
+        con.executemany(
+            "INSERT INTO allocations(order_number, material_prefix, material_full, "
+            "bike_super_model, bike_model, country, dealer_code) "
+            "VALUES(:order_number,:material_prefix,:material_full,"
+            ":bike_super_model,:bike_model,:country,:dealer_code)",
+            rows_to_insert,
+        )
+    con.execute(
+        "INSERT INTO allocation_reports(report_date, filename, row_count) "
+        "VALUES(?,?,?)",
+        (report_date, filename, len(rows_to_insert)),
+    )
+    return len(rows_to_insert), skipped
+
+
 # Material-prefix → plan-model auto-suggestion. Proposals are written to
 # material_map.proposed_plan_* and surfaced on the mapping page for admin
 # review; nothing is auto-applied.
@@ -724,6 +761,92 @@ def admin_help():
     return render_template("admin_help.html")
 
 
+# ----- api: allocations ingest (for email-to-webhook automation) ------
+
+@app.route("/api/allocations/ingest", methods=["POST"])
+def api_allocations_ingest():
+    """Accept an Allocations xlsx attachment over HTTP and apply it the same
+    way the admin upload would. Designed for an email-to-webhook service
+    (e.g. CloudMailin) forwarding allocation emails from Outlook.
+
+    Auth: header `X-API-Key` must equal env var ALLOCATIONS_INGEST_KEY.
+    Body: any uploaded file ending in .xlsx is taken as the allocations
+          file. The report date is parsed from its filename; the request
+          may override it via form field `report_date` or JSON
+          `report_date`.
+
+    Responses:
+      200 {status:'ok', added, skipped, report_date, filename}
+      200 {status:'rejected_older', current, attempted}
+        - older-date rejection; 200 so the webhook service doesn't retry
+      400 parse error / no attachment
+      401 missing or wrong API key
+      503 server not configured (env var absent)
+    """
+    expected_key = (os.environ.get("ALLOCATIONS_INGEST_KEY") or "").strip()
+    if not expected_key:
+        return jsonify({
+            "status": "server_misconfigured",
+            "detail": "ALLOCATIONS_INGEST_KEY env var not set",
+        }), 503
+    presented = request.headers.get("X-API-Key", "").strip()
+    if presented != expected_key:
+        return jsonify({"status": "unauthorized"}), 401
+
+    # Find the first .xlsx attachment regardless of form field name.
+    upload = None
+    for _key, f in request.files.items(multi=True):
+        if f and f.filename and f.filename.lower().endswith(".xlsx"):
+            upload = f
+            break
+    if upload is None:
+        return jsonify({
+            "status": "no_attachment",
+            "detail": "No .xlsx attachment found in request.files",
+        }), 400
+
+    # Report date: filename first, allow override via form/json.
+    override = (request.form.get("report_date")
+                or (request.get_json(silent=True) or {}).get("report_date")
+                or "").strip()
+    report_date = override or _parse_allocations_report_date(upload.filename)
+    if not report_date:
+        return jsonify({
+            "status": "bad_date",
+            "detail": ("Couldn't parse report_date from filename "
+                       f"'{upload.filename}' (expected "
+                       "'Allocations DD.MM.YY am|pm.xlsx'). "
+                       "Pass `report_date` form/JSON field to override."),
+        }), 400
+
+    last = _latest_allocations_report()
+    if last and report_date < last["report_date"]:
+        return jsonify({
+            "status": "rejected_older",
+            "current": last["report_date"],
+            "attempted": report_date,
+            "filename": upload.filename,
+        }), 200
+
+    try:
+        allocation_rows = parsers.parse_allocations(io.BytesIO(upload.stream.read()))
+    except Exception as e:
+        return jsonify({
+            "status": "parse_failed",
+            "detail": f"{type(e).__name__}: {e}",
+        }), 400
+
+    added, skipped = _ingest_allocations(allocation_rows, report_date, upload.filename)
+    db.get_conn().commit()
+    return jsonify({
+        "status": "ok",
+        "added": added,
+        "skipped": skipped,
+        "report_date": report_date,
+        "filename": upload.filename,
+    })
+
+
 # ----- admin: upload --------------------------------------------------
 
 @app.route("/admin/upload", methods=["GET", "POST"])
@@ -894,37 +1017,8 @@ def admin_upload():
     allocations_added = 0
     allocations_skipped = 0
     if allocation_rows is not None and allocations_file is not None:
-        existing_order_numbers = {
-            r["order_number"] for r in con.execute(
-                "SELECT order_number FROM allocations "
-                "WHERE order_number IS NOT NULL"
-            ).fetchall()
-        }
-        rows_to_insert = []
-        seen_in_file = set()
-        for row in allocation_rows:
-            on = row.get("order_number")
-            if on and (on in existing_order_numbers or on in seen_in_file):
-                allocations_skipped += 1
-                continue
-            if on:
-                seen_in_file.add(on)
-            rows_to_insert.append(row)
-        if rows_to_insert:
-            con.executemany(
-                "INSERT INTO allocations(order_number, material_prefix, material_full, "
-                "bike_super_model, bike_model, country, dealer_code) "
-                "VALUES(:order_number,:material_prefix,:material_full,"
-                ":bike_super_model,:bike_model,:country,:dealer_code)",
-                rows_to_insert,
-            )
-        allocations_added = len(rows_to_insert)
-        con.execute(
-            "INSERT INTO allocation_reports(report_date, filename, row_count) "
-            "VALUES(?,?,?)",
-            (allocations_report_date,
-             allocations_file.filename,
-             allocations_added),
+        allocations_added, allocations_skipped = _ingest_allocations(
+            allocation_rows, allocations_report_date, allocations_file.filename
         )
 
     # Auto-suggest mappings for unmapped prefixes. Cheap to always run — picks
