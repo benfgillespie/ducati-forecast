@@ -68,8 +68,10 @@
       <legend class="text-sm font-medium px-2">Allocations</legend>
       <p class="text-xs text-slate-500 mb-3">
         Bikes already delivered (off the orders sheet) — used to reduce the
-        forecast off the front of the queue. Replaces the previous snapshot;
-        an older-dated file will be rejected.
+        forecast off the front of the queue.
+        <strong>Cumulative</strong>: each upload adds new rows, deduped by
+        order number. Uploading a new <em>plan</em> wipes allocations to
+        start a fresh period. Older-dated allocation files are rejected.
       </p>
       <label class="flex items-start gap-2 mb-2 text-sm">
         <input type="radio" name="allocations_action" value="new" class="mt-1"

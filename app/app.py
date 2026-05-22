@@ -823,11 +823,18 @@ def admin_upload():
     # Plan side.
     new_prefixes = set()
     new_models = set()
+    plan_wiped_allocations = 0
     if plan_rows is not None:
         # Snapshot the existing plan_models so we can diff against the new upload.
         previous_models = {r["plan_model"] for r in con.execute(
             "SELECT DISTINCT plan_model FROM plan WHERE plan_model IS NOT NULL"
         ).fetchall()}
+        # A new plan = new accounting period for allocations. Wipe the table.
+        plan_wiped_allocations = con.execute(
+            "SELECT COUNT(*) AS c FROM allocations"
+        ).fetchone()["c"]
+        con.execute("DELETE FROM allocations")
+        con.execute("DELETE FROM allocation_reports")
         con.execute("DELETE FROM plan")
         con.executemany(
             "INSERT INTO plan(country, plan_super, plan_model, year, month, qty) "
@@ -880,22 +887,44 @@ def admin_upload():
                 (p,),
             )
 
-    # Allocations side.
+    # Allocations side. Append-only with order_number dedup — the sheet isn't
+    # cumulative but the DB needs to be, so each upload contributes only its
+    # not-yet-seen rows. A new plan upload (above) wipes the table to start
+    # the next accounting period fresh.
+    allocations_added = 0
+    allocations_skipped = 0
     if allocation_rows is not None and allocations_file is not None:
-        con.execute("DELETE FROM allocations")
-        con.executemany(
-            "INSERT INTO allocations(order_number, material_prefix, material_full, "
-            "bike_super_model, bike_model, country, dealer_code) "
-            "VALUES(:order_number,:material_prefix,:material_full,"
-            ":bike_super_model,:bike_model,:country,:dealer_code)",
-            allocation_rows,
-        )
+        existing_order_numbers = {
+            r["order_number"] for r in con.execute(
+                "SELECT order_number FROM allocations "
+                "WHERE order_number IS NOT NULL"
+            ).fetchall()
+        }
+        rows_to_insert = []
+        seen_in_file = set()
+        for row in allocation_rows:
+            on = row.get("order_number")
+            if on and (on in existing_order_numbers or on in seen_in_file):
+                allocations_skipped += 1
+                continue
+            if on:
+                seen_in_file.add(on)
+            rows_to_insert.append(row)
+        if rows_to_insert:
+            con.executemany(
+                "INSERT INTO allocations(order_number, material_prefix, material_full, "
+                "bike_super_model, bike_model, country, dealer_code) "
+                "VALUES(:order_number,:material_prefix,:material_full,"
+                ":bike_super_model,:bike_model,:country,:dealer_code)",
+                rows_to_insert,
+            )
+        allocations_added = len(rows_to_insert)
         con.execute(
             "INSERT INTO allocation_reports(report_date, filename, row_count) "
             "VALUES(?,?,?)",
             (allocations_report_date,
              allocations_file.filename,
-             len(allocation_rows)),
+             allocations_added),
         )
 
     # Auto-suggest mappings for unmapped prefixes. Cheap to always run — picks
@@ -931,12 +960,19 @@ def admin_upload():
     else:
         parts.append("orders reused")
     if allocation_rows is not None:
-        parts.append(f"{len(allocation_rows)} allocations ({allocations_report_date})")
+        bits = [f"+{allocations_added} allocations"]
+        if allocations_skipped:
+            bits.append(f"{allocations_skipped} duplicate(s) skipped")
+        bits.append(f"report {allocations_report_date}")
+        parts.append(" ".join(bits))
     elif last_alloc:
-        parts.append("allocations reused")
+        parts.append("allocations kept")
     else:
         parts.append("no allocations")
     msg = "Imported: " + ", ".join(parts) + "."
+    if plan_wiped_allocations:
+        msg += (f" Allocations table wiped ({plan_wiped_allocations} row(s) "
+                f"cleared) because a new plan was uploaded.")
     if new_prefixes:
         msg += f" {len(new_prefixes)} new Material prefix(es) detected."
     if proposed_n:
