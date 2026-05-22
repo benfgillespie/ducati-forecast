@@ -3,87 +3,176 @@
 <div class="prose max-w-3xl">
 <style>
   .prose h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.75rem; }
-  .prose h2 { font-size: 1.05rem; font-weight: 600; margin-top: 1.75rem; margin-bottom: 0.5rem; }
-  .prose h3 { font-size: 0.95rem; font-weight: 600; margin-top: 1.25rem; margin-bottom: 0.35rem; }
+  .prose h2 { font-size: 1.05rem; font-weight: 600; margin-top: 1.75rem; margin-bottom: 0.5rem; color: #1e293b; }
+  .prose h3 { font-size: 0.95rem; font-weight: 600; margin-top: 1.25rem; margin-bottom: 0.35rem; color: #1e293b; }
   .prose p { margin-bottom: 0.75rem; color: #475569; }
   .prose ul { margin-bottom: 0.75rem; padding-left: 1.25rem; list-style: disc; color: #475569; }
-  .prose ul li { margin-bottom: 0.25rem; }
+  .prose ol { margin-bottom: 0.75rem; padding-left: 1.25rem; list-style: decimal; color: #475569; }
+  .prose ul li, .prose ol li { margin-bottom: 0.25rem; }
   .prose code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }
   .prose pre { background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 6px; font-size: 0.85em; overflow-x: auto; margin-bottom: 0.75rem; }
   .prose strong { color: #1e293b; }
+  .status-badge { display: inline-block; padding: 1px 8px; font-size: 0.7rem; font-weight: 600; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 6px; vertical-align: 2px; }
+  .status-live      { background: #d1fae5; color: #065f46; }
+  .status-progress  { background: #fef3c7; color: #92400e; }
+  .status-planned   { background: #e0e7ff; color: #3730a3; }
+  .updated { color: #94a3b8; font-size: 0.78rem; }
 </style>
 
-<h1>How this dashboard works</h1>
+<h1>Dashboard README</h1>
+<p class="updated">Maintained: 2026-05-22 — features and status below reflect the current build.</p>
+
 <p>
-  A small internal portal that shows dealers — across the UK, Sweden and Norway —
-  when bikes are likely to be available. It's fed by the weekly DUK plan workbook
-  and the orders export. Each dealer logs in with a personal password and sees a
-  country-wide availability grid plus their own committed orders.
+  A small internal portal that shows dealers across the UK, Sweden and Norway when
+  Ducati bikes are likely to be available. The admin uploads the plan workbook, the
+  orders export, and (twice a day) the allocations file; each dealer logs in with a
+  personal password to see a country-wide availability grid plus their own committed
+  orders.
 </p>
 
-<h2>The pages</h2>
+<h2>Status legend</h2>
 <ul>
-  <li><strong>Admin</strong> — at-a-glance counts (dealers, orders, plan rows, unmapped SKUs), the last-import details, and the notification panel for things that need attention.</li>
-  <li><strong>Upload</strong> — drop in the latest plan workbook and orders export. Each upload <em>replaces</em> the plan and orders tables. Mapping table, dealers, embargoes and admin password persist.</li>
-  <li><strong>Mapping</strong> — joins each order to its plan-model row using the leading token of the order's <code>Material</code> column (e.g. <code>MSV4S</code> → <code>MTS V4 S / MTS V4 S MTO</code>). The seed covers the 37 SKU prefixes seen so far; any new prefix that arrives on a future upload lands here as <em>unmapped</em> until you assign it.</li>
-  <li><strong>Embargoes</strong> — hide selected models from every dealer's view. Tick rows in the table (<kbd>↑</kbd>/<kbd>↓</kbd> to navigate, <kbd>Space</kbd> to toggle), then use <em>Assign embargo date</em>, <em>Embargo all selected</em>, or <em>Unembargo all selected</em>.</li>
-  <li><strong>Dealers</strong> — manage per-dealer passwords. Each dealer is bound to a country (UK / SWE / NOR) and optionally to a dealer code, which is what makes their own committed orders show on their page. The admin password lives at the bottom of this page.</li>
-  <li><strong>Dealer view</strong> — preview the grid every dealer sees. Same numbers regardless of which dealer; the only per-dealer difference is the "Your committed orders" panel.</li>
+  <li><span class="status-badge status-live">Live</span> — working in production, safe to rely on.</li>
+  <li><span class="status-badge status-progress">In progress</span> — built but rough edges remain or further iteration planned.</li>
+  <li><span class="status-badge status-planned">Planned</span> — agreed but not built yet.</li>
 </ul>
 
-<h2>How availability is computed</h2>
-<p>For each (model, month) cell:</p>
-<pre>available = DUK Sell In forecast
-          − all open Demo / Courtesy orders (locked to their delivery month)
-          − all open end-customer orders (FIFO'd by order creation date,
-            cascading forward when a month fills up)</pre>
-<p>
-  Stock / dealer orders are deliberately <strong>not subtracted</strong> — they're the
-  elastic at the back of the queue and slide later when customer orders come in.
-</p>
+<!-- ============================================================ -->
+<h2>What you can do today</h2>
 
-<h3>The traffic-light dots</h3>
+<h3>Upload data <span class="status-badge status-live">Live</span></h3>
+<p>
+  <strong>Admin → Upload</strong> takes three xlsx files independently. Each has
+  <em>Upload new</em> / <em>Reuse last upload</em> radios so you can refresh just one
+  side without re-uploading the others.
+</p>
+<ul>
+  <li><strong>Plan workbook</strong> — typically refreshed monthly. Each upload <em>replaces</em> the plan and <em>wipes the allocations table</em> (a new plan = new accounting period).</li>
+  <li><strong>Orders export</strong> — open orders only. Each upload replaces the orders table.</li>
+  <li><strong>Allocations</strong> — bikes already delivered and dropped off the orders sheet. <em>Cumulative</em> across uploads, deduped by order number. Twice-a-day cadence is expected.</li>
+</ul>
+
+<h3>Availability math <span class="status-badge status-live">Live</span></h3>
+<p>For each (model, month) cell on the dealer grid:</p>
+<pre>available[month] = forecast[month]
+                 − allocated[month]     (off the front of the forecast)
+                 − committed[month]     (open orders FIFO, then overflow)</pre>
+<p>
+  Allocations come off first: walk months chronologically and subtract from each
+  month's forecast until the allocations count is exhausted; excess spills to the
+  next month. Then committed orders (Demo / Courtesy / End-customer-status=Yes)
+  fill remaining capacity FIFO by order creation date. Overflow piles onto the last
+  month, so negative <em>available</em> numbers signal an overcommit.
+</p>
+<p>Hover any cell on the dealer view for the breakdown.</p>
+
+<h4>Traffic-light dots</h4>
 <ul>
   <li><span class="inline-block w-3 h-3 rounded-full bg-emerald-500 align-middle"></span> &nbsp; ≥ 10 available — comfortably open.</li>
-  <li><span class="inline-block w-3 h-3 rounded-full bg-amber-400 align-middle"></span> &nbsp; 1–9 available — limited; might fill up by the time a customer commits.</li>
-  <li><span class="inline-block w-3 h-3 rounded-full bg-rose-500 align-middle"></span> &nbsp; 0 or negative — fully booked (or overbooked) for that month.</li>
+  <li><span class="inline-block w-3 h-3 rounded-full bg-amber-400 align-middle"></span> &nbsp; 1–9 available — limited.</li>
+  <li><span class="inline-block w-3 h-3 rounded-full bg-rose-500 align-middle"></span> &nbsp; 0 or negative — fully booked or overcommitted.</li>
 </ul>
 
-<h2>Notifications</h2>
-<p>Two surface on the Admin home when relevant — both have inline actions:</p>
+<h3>Material → plan-model mapping <span class="status-badge status-live">Live</span></h3>
+<p>
+  Orders join to plan rows by the leading token of each order's <code>Material</code>
+  column (e.g. <code>MSV4S</code> → <code>MTS V4 S / MTS V4 S MTO</code>). Unmapped
+  prefixes are excluded from dealer availability until you assign them.
+</p>
+<p>
+  <strong>Auto-suggest</strong>: on every import, the dashboard scans unmapped
+  prefixes and proposes a mapping by matching the bike's super-model + model name
+  against the plan's. Suggestions appear inline on the Mapping page with
+  <em>Accept</em> / <em>Reject</em> buttons and an <em>Accept all N suggestions</em>
+  shortcut at the top.
+</p>
+<ul>
+  <li>Matching does case normalization, expands abbreviations (<code>Multistrada</code> ↔ <code>MTS</code>, <code>Streetfighter</code> ↔ <code>SF</code>, etc.) and accepts substring matches (e.g. <code>MTS V2 ST</code> matches a bike named <code>Multistrada V2S Travel</code>).</li>
+  <li><em>Reject</em> suppresses re-suggestion on future imports for that prefix.</li>
+  <li>Some genuine model renames (e.g. plan says <code>Cross 450</code> but Ducati now calls it <code>Desmo450 MX</code>) will never auto-match — those need a one-time manual mapping. They stick once you save them.</li>
+  <li><strong>Danger zone</strong> at the bottom of the Mapping page lets you wipe all mappings (with a backup) and re-run auto-suggest from scratch — useful for testing the suggester.</li>
+</ul>
+
+<h3>Embargoes <span class="status-badge status-live">Live</span></h3>
+<p>
+  <strong>Admin → Embargoes</strong> hides selected models from every dealer's view.
+  Tick rows in the table (<kbd>↑</kbd>/<kbd>↓</kbd> to navigate, <kbd>Space</kbd> to
+  toggle), then use <em>Assign embargo date</em>, <em>Embargo all selected</em>, or
+  <em>Unembargo all selected</em>.
+</p>
+
+<h3>Dealers <span class="status-badge status-live">Live</span></h3>
+<p>
+  <strong>Admin → Dealers</strong> manages per-dealer passwords. Each dealer is bound
+  to a country (UK / SWE / NOR) and a dealer code — the code is what makes their own
+  committed orders show on their page. The admin password lives at the bottom.
+</p>
+
+<h3>Notifications on the admin home <span class="status-badge status-live">Live</span></h3>
 <ul>
   <li><strong>Embargo may be over</strong> — a model is currently embargoed but has open orders against it. Click <em>Lift embargo</em> to make it visible to dealers again.</li>
-  <li><strong>New bikes</strong> — plan models that appeared in the latest upload but weren't in the previous one. Click <em>Embargo</em> to hide them while they're being prepared, or <em>Dismiss</em> to mark reviewed.</li>
+  <li><strong>New bikes</strong> — plan models that appeared in the latest upload but weren't in the previous one. <em>Embargo</em> to hide while they're being prepared, or <em>Dismiss</em> to mark reviewed.</li>
 </ul>
 
-<h2>Weekly routine</h2>
-<ol class="list-decimal pl-5 text-slate-600 mb-3">
-  <li>Drop the two xlsx files into <strong>Admin → Upload</strong>.</li>
-  <li>Open the Admin home and resolve any notifications.</li>
-  <li>Check <strong>Mapping</strong> if the import flagged unmapped SKUs.</li>
-  <li>Use <strong>Dealer view</strong> to spot-check the grid before dealers see it.</li>
+<h3>Automated allocations ingest <span class="status-badge status-progress">In progress</span></h3>
+<p>
+  Endpoint <code>POST /api/allocations/ingest</code> accepts an xlsx upload from an
+  email-to-webhook service (recommended: <a href="https://www.cloudmailin.com" class="text-blue-600 hover:underline">CloudMailin</a>) so the twice-a-day Outlook
+  allocations email can flow straight into the dashboard. Auth via <code>X-API-Key</code>
+  header against an env var.
+</p>
+<p>
+  <strong>Setup still required:</strong> the <code>ALLOCATIONS_INGEST_KEY</code> env
+  var has to be added on Vercel, then CloudMailin + an Outlook rule configured. See
+  <code>docs/allocations-email-ingest.md</code> in the repo for step-by-step.
+</p>
+
+<!-- ============================================================ -->
+<h2>Weekly / daily routine</h2>
+<ol>
+  <li><strong>Twice a day</strong>: allocations file uploaded (manually for now, automated soon via CloudMailin).</li>
+  <li><strong>Weekly</strong>: latest orders export to <em>Admin → Upload</em>. Reuse the plan and allocations.</li>
+  <li><strong>Monthly</strong>: new plan workbook. This wipes allocations to start the period fresh.</li>
+  <li>After any upload: open the admin home and resolve any notifications. If new material prefixes appeared, head to <em>Mapping</em> and accept/reject the auto-suggestions.</li>
+  <li>Spot-check via <strong>Dealer view</strong> before the next dealer logs in.</li>
 </ol>
 
+<!-- ============================================================ -->
 <h2>Source data shape</h2>
 <ul>
-  <li><strong>Plan workbook</strong> — the parser reads the <em>Sell In</em> block of the <code>DUK_26</code> and <code>DUK_27</code> sheets (column layout auto-detected). Other blocks (Sell Out, Dealer Inventory, Shipment) are ignored. Ross sometimes overrides DUK totals so the rollup is read directly rather than re-summed from the country sheets.</li>
-  <li><strong>Orders export</strong> — filtered to <code>Order Status Group = Open</code>. The Material column's leading token is the join key. Country values <code>UNITED KINGDOM</code>, <code>CHANNEL ISLANDS</code>, <code>IRELAND</code> are all bucketed as <code>UK</code>; <code>SWEDEN</code> → <code>SWE</code>; <code>NORWAY</code> → <code>NOR</code>.</li>
+  <li><strong>Plan workbook</strong> — the parser reads the <em>Sell In</em> block of the <code>DUK_26</code> / <code>DUK_27</code> sheets (column layout auto-detected). Other blocks (Sell Out, Dealer Inventory, Shipment) are ignored.</li>
+  <li><strong>Orders export</strong> — <code>Export</code> sheet, filtered to <code>Order Status Group = Open</code>. The Material column's leading token is the join key. <code>UNITED KINGDOM</code>, <code>CHANNEL ISLANDS</code>, <code>IRELAND</code> all bucket as <code>UK</code>; <code>SWEDEN</code> → <code>SWE</code>; <code>NORWAY</code> → <code>NOR</code>.</li>
+  <li><strong>Allocations</strong> — like the orders Export sheet but with a leading row-ID column and interleaved blank rows. The parser auto-detects the column offset. Filename should match <code>Allocations DD.MM.YY (am|pm).xlsx</code> so the report date is read automatically; an inline date-override field is available if not.</li>
+  <li><strong>Customer / dealer columns</strong> — the customer-name column is discarded at parse time for data-protection reasons. Dealer-code is used to filter the per-dealer "Your committed orders" panel.</li>
 </ul>
 
+<!-- ============================================================ -->
+<h2>Roadmap / under discussion</h2>
+<ul>
+  <li><span class="status-badge status-progress">In progress</span> <strong>Sharpen auto-suggest precision.</strong> Current matcher gets ~60% of unmapped prefixes correctly. Some genuine renames (Cross 450 ↔ Desmo450 MX, Enduro 450 ↔ Desmo450 EDS) need either a Ducati synonym list or one-off manual mappings — TBD with Ross.</li>
+  <li><span class="status-badge status-progress">In progress</span> <strong>Email-to-webhook ingest go-live</strong>. Endpoint built and locally tested; needs Vercel env var + CloudMailin account + Outlook rule.</li>
+  <li><span class="status-badge status-planned">Planned</span> <strong>Auto-clear allocations at month boundary</strong> if no plan re-upload has happened. Currently allocations persist until a new plan upload — which means a missed plan upload leaves stale allocations counting against the new month.</li>
+  <li><span class="status-badge status-planned">Planned</span> <strong>Ducati master SKU file</strong>. If Ross can source a canonical SKU → model-name list from Ducati, the fuzzy matcher becomes unnecessary and mappings become deterministic.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>Troubleshooting</h2>
+<ul>
+  <li><strong>Dealer sees stale data</strong> — re-upload via Admin → Upload (you can reuse the side that hasn't changed).</li>
+  <li><strong>An allocation isn't showing up in the math</strong> — its material prefix is probably unmapped. Visit Mapping; accept its auto-suggestion or assign manually.</li>
+  <li><strong>"Allocations file is older than current snapshot"</strong> — you uploaded an earlier-dated file by accident, or the filename's date is wrong. Either upload the correct file or use the inline date-override field.</li>
+  <li><strong>Forgot the admin password</strong> — open the Supabase project's SQL editor and run: <code>UPDATE settings SET value='new-password' WHERE key='admin_password';</code></li>
+  <li><strong>Clean reset</strong> — Supabase SQL editor: <code>TRUNCATE plan, orders, allocations, allocation_reports;</code> then re-upload. Dealers, embargoes and mapping stay intact.</li>
+  <li><strong>Debug the auto-suggester</strong> — open <code>{{ request.url_root }}dashboard/admin/mapping/dump</code> for a plain-text dump of every prefix, its current/proposed mapping, the bike super/model from orders, and a list of every plan_super/plan_model pair.</li>
+</ul>
+
+<!-- ============================================================ -->
 <h2>Where it lives</h2>
 <ul>
   <li>Live: <code>{{ request.url_root }}dashboard</code></li>
   <li>Source: <a href="https://github.com/benfgillespie/ducati-forecast" class="text-blue-600 hover:underline">github.com/benfgillespie/ducati-forecast</a></li>
   <li>Database: Supabase Postgres (Vercel storage)</li>
-  <li>Local dev: SQLite (<code>app/data/dashboard.db</code>) — see the repo README for setup.</li>
-</ul>
-
-<h2>If something goes wrong</h2>
-<ul>
-  <li><strong>Dealer sees stale data</strong> — re-upload the latest xlsx via Admin → Upload.</li>
-  <li><strong>New SKU appeared and isn't subtracted</strong> — it'll be flagged as unmapped on Mapping; assign it to a plan row.</li>
-  <li><strong>Forgot the admin password</strong> — open the Supabase project's SQL editor and run <code>UPDATE settings SET value='new-password' WHERE key='admin_password';</code></li>
-  <li><strong>Want a clean reset</strong> — same SQL editor: <code>TRUNCATE plan, orders;</code> then re-upload. Dealers/embargoes/mapping stay intact.</li>
+  <li>Local dev: SQLite (<code>app/data/dashboard.db</code>) — see the repo <code>README.md</code> for setup.</li>
 </ul>
 
 </div>
