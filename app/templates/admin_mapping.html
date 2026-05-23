@@ -37,6 +37,17 @@
 </div>
 {% endif %}
 
+<!-- One bare form per row, declared outside the table so the foster-parenting
+     HTML rules don't strip them. Inputs/selects/buttons inside the table
+     reference them via the form="..." attribute. -->
+{% for r in rows %}
+  <form id="map-{{ r.material_prefix }}" method="post"
+        action="{{ url_for('admin_mapping_update') }}"></form>
+  <form id="map-del-{{ r.material_prefix }}" method="post"
+        action="{{ url_for('admin_mapping_delete') }}"
+        onsubmit="return confirm('Delete {{ r.material_prefix }} from the map?');"></form>
+{% endfor %}
+
 <div class="bg-white border border-slate-200 rounded shadow-sm overflow-x-auto">
   <table class="text-sm w-full">
     <thead class="bg-slate-100 text-slate-600">
@@ -51,65 +62,67 @@
     </thead>
     <tbody>
       {% for r in rows %}
+      {% set fid = "map-" ~ r.material_prefix %}
       <tr class="border-t border-slate-100 transition-colors duration-700 {% if r.status == 'unmapped' %}bg-amber-50{% endif %}">
-        <form method="post" action="{{ url_for('admin_mapping_update') }}">
-          <input type="hidden" name="prefix" value="{{ r.material_prefix }}">
-          <td class="px-3 py-2 font-mono align-top">{{ r.material_prefix }}</td>
-          <td class="px-3 py-2 text-slate-600 align-top">
-            {% if r.bike_supers %}<div class="text-xs text-slate-400">{{ r.bike_supers }}</div>{% endif %}
-            <div>{{ r.bike_models or '—' }}</div>
-          </td>
-          <td class="px-3 py-2 align-top">{{ r.order_count }}</td>
-          <td class="px-3 py-2 align-top">
-            <select name="plan_combo" onchange="mappingAutoSave(this.form)"
-                    class="border border-slate-300 rounded px-2 py-1 text-sm">
-              <option value="">— unassigned —</option>
-              {% for pm in plan_models %}
-                {% set combo = (pm.plan_super or '') ~ ' || ' ~ pm.plan_model %}
-                <option value="{{ combo }}"
-                  {% if r.plan_super == pm.plan_super and r.plan_model == pm.plan_model %}selected{% endif %}>
-                  {{ pm.plan_super }} — {{ pm.plan_model }}
-                </option>
-              {% endfor %}
-            </select>
-            {% if r.proposed_plan_model %}
-            <div class="mt-2 bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5 text-xs flex items-center gap-2">
-              <span class="text-emerald-800">
-                Suggested:
-                <span class="font-medium">{{ r.proposed_plan_super }} — {{ r.proposed_plan_model }}</span>
-              </span>
-              <button type="submit"
-                      formaction="{{ url_for('admin_mapping_accept') }}"
-                      class="bg-emerald-700 text-white rounded px-2 py-0.5 hover:bg-emerald-600">
-                Accept
-              </button>
-              <button type="submit"
-                      formaction="{{ url_for('admin_mapping_reject') }}"
-                      class="text-slate-500 hover:underline">
-                Reject
-              </button>
-            </div>
-            {% endif %}
-          </td>
-          <td class="px-3 py-2 align-top">
-            <select name="status" onchange="mappingAutoSave(this.form)"
-                    class="border border-slate-300 rounded px-2 py-1 text-sm">
-              <option value="active" {% if r.status == 'active' %}selected{% endif %}>Active</option>
-              <option value="unmapped" {% if r.status == 'unmapped' %}selected{% endif %}>Unmapped</option>
-              <option value="ignored" {% if r.status == 'ignored' %}selected{% endif %}>Ignored</option>
-            </select>
-          </td>
-          <td class="px-3 py-2 text-right whitespace-nowrap align-top">
-            <button class="text-xs bg-slate-800 text-white rounded px-2 py-1 hover:bg-slate-700">Save</button>
-            <span class="mapping-save-indicator block text-xs mt-1"></span>
-          </td>
-        </form>
+        <td class="px-3 py-2 font-mono align-top">
+          {{ r.material_prefix }}
+          <input type="hidden" form="{{ fid }}" name="prefix" value="{{ r.material_prefix }}">
+        </td>
+        <td class="px-3 py-2 text-slate-600 align-top">
+          {% if r.bike_supers %}<div class="text-xs text-slate-400">{{ r.bike_supers }}</div>{% endif %}
+          <div>{{ r.bike_models or '—' }}</div>
+        </td>
+        <td class="px-3 py-2 align-top">{{ r.order_count }}</td>
         <td class="px-3 py-2 align-top">
-          <form method="post" action="{{ url_for('admin_mapping_delete') }}"
-                onsubmit="return confirm('Delete {{ r.material_prefix }} from the map?');">
-            <input type="hidden" name="prefix" value="{{ r.material_prefix }}">
-            <button class="text-xs text-rose-600 hover:underline">Delete</button>
-          </form>
+          <select name="plan_combo" form="{{ fid }}"
+                  onchange="mappingAutoSave(this)"
+                  class="border border-slate-300 rounded px-2 py-1 text-sm">
+            <option value="">— unassigned —</option>
+            {% for pm in plan_models %}
+              {% set combo = (pm.plan_super or '') ~ ' || ' ~ pm.plan_model %}
+              <option value="{{ combo }}"
+                {% if r.plan_super == pm.plan_super and r.plan_model == pm.plan_model %}selected{% endif %}>
+                {{ pm.plan_super }} — {{ pm.plan_model }}
+              </option>
+            {% endfor %}
+          </select>
+          {% if r.proposed_plan_model %}
+          <div class="mt-2 bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5 text-xs flex items-center gap-2">
+            <span class="text-emerald-800">
+              Suggested:
+              <span class="font-medium">{{ r.proposed_plan_super }} — {{ r.proposed_plan_model }}</span>
+            </span>
+            <button type="submit" form="{{ fid }}"
+                    formaction="{{ url_for('admin_mapping_accept') }}"
+                    class="bg-emerald-700 text-white rounded px-2 py-0.5 hover:bg-emerald-600">
+              Accept
+            </button>
+            <button type="submit" form="{{ fid }}"
+                    formaction="{{ url_for('admin_mapping_reject') }}"
+                    class="text-slate-500 hover:underline">
+              Reject
+            </button>
+          </div>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2 align-top">
+          <select name="status" form="{{ fid }}"
+                  onchange="mappingAutoSave(this)"
+                  class="border border-slate-300 rounded px-2 py-1 text-sm">
+            <option value="active" {% if r.status == 'active' %}selected{% endif %}>Active</option>
+            <option value="unmapped" {% if r.status == 'unmapped' %}selected{% endif %}>Unmapped</option>
+            <option value="ignored" {% if r.status == 'ignored' %}selected{% endif %}>Ignored</option>
+          </select>
+        </td>
+        <td class="px-3 py-2 text-right whitespace-nowrap align-top">
+          <button type="submit" form="{{ fid }}"
+                  class="text-xs bg-slate-800 text-white rounded px-2 py-1 hover:bg-slate-700">Save</button>
+          <span class="mapping-save-indicator block text-xs mt-1" data-prefix="{{ r.material_prefix }}"></span>
+        </td>
+        <td class="px-3 py-2 align-top">
+          <input type="hidden" form="map-del-{{ r.material_prefix }}" name="prefix" value="{{ r.material_prefix }}">
+          <button type="submit" form="map-del-{{ r.material_prefix }}"
+                  class="text-xs text-rose-600 hover:underline">Delete</button>
         </td>
       </tr>
       {% endfor %}
@@ -136,12 +149,17 @@
 </div>
 
 <script>
-  // Auto-save: dropdowns POST via fetch when changed, no page reload.
-  // Row flashes green with a "Saved" indicator; on failure, flashes
-  // red with an "Error" indicator (Save button still works as fallback).
-  function mappingAutoSave(form) {
-    const row = form.closest('tr');
-    const ind = form.querySelector('.mapping-save-indicator');
+  // Auto-save: a select inside a row, with form="map-<prefix>" attribute,
+  // gets POSTed via fetch when changed. Row flashes green with a "Saved"
+  // indicator. The Save button still works as a fallback.
+  function mappingAutoSave(select) {
+    const form = select.form;
+    if (!form) {
+      console.error('mappingAutoSave: select has no form owner', select);
+      return;
+    }
+    const row = select.closest('tr');
+    const ind = row.querySelector('.mapping-save-indicator');
     ind.textContent = 'Saving…';
     ind.className = 'mapping-save-indicator block text-xs mt-1 text-slate-400';
     fetch(form.action, {
@@ -156,12 +174,9 @@
     .then(() => {
       ind.textContent = '✓ Saved';
       ind.className = 'mapping-save-indicator block text-xs mt-1 text-emerald-700 font-medium';
-      // Strip the amber unmapped background if status changed to active.
       row.classList.remove('bg-amber-50');
       row.classList.add('bg-emerald-100');
-      setTimeout(() => {
-        row.classList.remove('bg-emerald-100');
-      }, 1200);
+      setTimeout(() => row.classList.remove('bg-emerald-100'), 1200);
       setTimeout(() => { ind.textContent = ''; }, 2400);
     })
     .catch(err => {
