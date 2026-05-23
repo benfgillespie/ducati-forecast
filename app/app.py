@@ -505,6 +505,23 @@ def _norm(s):
     return _NORM_PUNCT_RE.sub("", s)
 
 
+_TOKEN_SPLIT_RE = re.compile(r"[^a-z0-9+]+")
+
+
+def _tokens(s):
+    """Split a model name into normalized tokens. Lowercases, applies the
+    same abbreviation table as _norm, then splits on whitespace and
+    punctuation. Used by the token-set match tier — lets 'HYM SP' match a
+    bike named 'Hypermotard V2 SP' even though the tokens aren't
+    contiguous in the squashed string."""
+    if s is None:
+        return ()
+    s = str(s).lower()
+    for long_form, short_form in _ABBREV:
+        s = s.replace(long_form, short_form)
+    return tuple(t for t in _TOKEN_SPLIT_RE.split(s) if t)
+
+
 def _name_variants(name):
     """Yield reasonable alternative forms of a model name so a single plan
     entry like 'MTS V4 S / MTS V4 S MTO' matches either side, and
@@ -607,38 +624,87 @@ def _auto_suggest_mappings():
             if match:
                 break
 
-        # Tier 3: substring match. Two cases:
+        # Candidate plan set (shared by token + substring tiers): prefer
+        # plans whose super exactly matches the bike super; only fall back
+        # to loose-super plans if no exact-super candidate exists. This
+        # avoids cases where the same model exists under two supers (e.g.
+        # 'Panigale' and 'Panigale V4') and would otherwise be ambiguous.
+        def _candidate_plans_for(bs_norm):
+            ex = set(); loose = set()
+            for plan_super_norm, plans in super_index.items():
+                if not plan_super_norm or not bs_norm:
+                    continue
+                if plan_super_norm == bs_norm:
+                    ex |= plans
+                elif (plan_super_norm in bs_norm
+                      or bs_norm in plan_super_norm):
+                    loose |= plans
+            return ex or loose or all_plans
+
+        # Tier 3: token-set match. Only fires when one side is fully
+        # contained in the other (plan ⊆ bike OR bike ⊆ plan) — partial
+        # overlap is too permissive and would grab generic plans for
+        # specific bikes (e.g. picking 'MTS V2' for 'Multistrada V2S
+        # Travel' on a single shared 'mts' token).
+        # Among full-inclusion candidates, score by (tokens shared,
+        # −extra plan tokens). Highest shared count wins; ties broken by
+        # the plan with the fewest extras. So:
+        #   - 'HYM SP' [hym, sp] vs bike 'Hypermotard V2 SP' [hym, v2, sp]
+        #     (plan ⊆ bike, 2 shared, 0 extra) beats 'HYM' (1 shared).
+        #   - 'Panigale V2 (896) S FB63' [pan, v2, 896, s, fb63] vs bike
+        #     'Panigale V2 FB63' [pan, v2, fb63] (bike ⊆ plan, 3 shared,
+        #     2 extra) beats 'Panigale V2' (2 shared, 0 extra).
+        if match is None:
+            for o in orders:
+                bs = o["bike_super_model"]
+                bm = o["bike_model"]
+                candidate_plans = _candidate_plans_for(_norm(bs))
+                for bm_variant in _name_variants(bm):
+                    bm_tokens = set(_tokens(bm_variant))
+                    if not bm_tokens:
+                        continue
+                    hits = []
+                    for ps, pm in candidate_plans:
+                        best_for_plan = None
+                        for pm_variant in _name_variants(pm):
+                            pm_tokens = set(_tokens(pm_variant))
+                            if not pm_tokens:
+                                continue
+                            # Require full inclusion in either direction
+                            # — partial overlap is too noisy.
+                            if not (pm_tokens <= bm_tokens
+                                    or bm_tokens <= pm_tokens):
+                                continue
+                            shared = len(pm_tokens & bm_tokens)
+                            extra = len(pm_tokens - bm_tokens)
+                            score = (shared, -extra)
+                            if best_for_plan is None or score > best_for_plan:
+                                best_for_plan = score
+                        if best_for_plan is not None:
+                            hits.append((best_for_plan, ps, pm))
+                    if hits:
+                        hits.sort(reverse=True)
+                        top_score = hits[0][0]
+                        winners = {(h[1], h[2]) for h in hits if h[0] == top_score}
+                        if len(winners) == 1:
+                            match = winners.pop()
+                            break
+                if match:
+                    break
+
+        # Tier 4: substring match. Two cases:
         #   A) plan ⊂ bike  — the plan rolls up a specific bike. Want the
         #      LONGEST plan that fits in the bike (most informative).
         #   B) bike ⊂ plan  — the plan name has extra suffixes (gen markers,
         #      special editions). Want the SHORTEST plan that contains the
         #      bike — picking the longest would silently upgrade 'Nightshift'
         #      to 'Nightshift Centenario'.
-        # Candidate plan set is scoped by super: prefer plans whose super
-        # exactly matches the bike super; only fall back to loose-super
-        # plans if no exact-super candidate exists. This avoids cases where
-        # the same model exists under two supers (e.g. 'Panigale' and
-        # 'Panigale V4') and would otherwise be ambiguous.
         _MIN_SUBSTR_LEN = 3
         if match is None:
             for o in orders:
                 bs = o["bike_super_model"]
                 bm = o["bike_model"]
-                bs_norm = _norm(bs)
-
-                exact_super_plans = set()
-                loose_super_plans = set()
-                for plan_super_norm, plans in super_index.items():
-                    if not plan_super_norm or not bs_norm:
-                        continue
-                    if plan_super_norm == bs_norm:
-                        exact_super_plans |= plans
-                    elif (plan_super_norm in bs_norm
-                          or bs_norm in plan_super_norm):
-                        loose_super_plans |= plans
-                candidate_plans = (exact_super_plans
-                                   or loose_super_plans
-                                   or all_plans)
+                candidate_plans = _candidate_plans_for(_norm(bs))
 
                 for bm_variant in _name_variants(bm):
                     bm_norm = _norm(bm_variant)
@@ -1190,8 +1256,34 @@ def admin_mapping():
         "SELECT snapshot_at, row_count FROM material_map_backups "
         "ORDER BY id DESC LIMIT 1"
     ).fetchone()
+
+    # Surface plan_models that have more than one active material prefix
+    # pointing at them — almost always a sign the matcher (or admin) picked
+    # a too-generic plan when more specific options exist. Listed so the
+    # admin can split them up.
+    dup_rows = con.execute(
+        "SELECT plan_super, plan_model, "
+        + db.group_concat_distinct("material_prefix")
+        + " AS prefixes, COUNT(*) AS n "
+        "FROM material_map "
+        "WHERE status='active' AND plan_model IS NOT NULL "
+        "GROUP BY plan_super, plan_model "
+        "HAVING COUNT(*) > 1 "
+        "ORDER BY plan_super, plan_model"
+    ).fetchall()
+    duplicates = [
+        {
+            "plan_super": r["plan_super"],
+            "plan_model": r["plan_model"],
+            "prefixes": (r["prefixes"] or "").split(","),
+            "n": r["n"],
+        }
+        for r in dup_rows
+    ]
+
     return render_template("admin_mapping.html", rows=rows, plan_models=plan_models,
-                           proposal_count=proposal_count, latest_backup=latest_backup)
+                           proposal_count=proposal_count, latest_backup=latest_backup,
+                           duplicates=duplicates)
 
 
 @app.route("/admin/mapping/update", methods=["POST"])
@@ -1215,6 +1307,16 @@ def admin_mapping_update():
         (plan_super, plan_model, status, prefix),
     )
     db.get_conn().commit()
+    # Auto-save uses fetch with X-Requested-With; reply with JSON so the
+    # page can show its "Saved" indicator without navigating away.
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return jsonify({
+            "status": "ok",
+            "material_prefix": prefix,
+            "plan_super": plan_super,
+            "plan_model": plan_model,
+            "row_status": status,
+        })
     return redirect(url_for("admin_mapping"))
 
 

@@ -20,7 +20,7 @@
 </style>
 
 <h1>Dashboard README</h1>
-<p class="updated">Maintained: 2026-05-22 (evening) — features and status below reflect the current build.</p>
+<p class="updated">Maintained: 2026-05-23 — features and status below reflect the current build.</p>
 
 <p>
   A small internal portal that shows dealers across the UK, Sweden and Norway when
@@ -92,9 +92,11 @@
   shortcut at the top.
 </p>
 <ul>
-  <li>Matching does case normalization, expands abbreviations (<code>Multistrada</code> ↔ <code>MTS</code>, <code>Streetfighter</code> ↔ <code>SF</code>, etc.) and accepts substring matches (e.g. <code>MTS V2 ST</code> matches a bike named <code>Multistrada V2S Travel</code>).</li>
+  <li>Matching does case normalization, expands abbreviations (<code>Multistrada</code> ↔ <code>MTS</code>, <code>Streetfighter</code> ↔ <code>SF</code>, <code>Pikes Peak</code> → <code>PP</code>, etc.), and runs four tiers: exact match, model-only exact, token-set inclusion (prefers the most-specific plan whose tokens are fully contained in the bike's or vice versa — catches <code>HYM SP</code> ↔ <code>Hypermotard V2 SP</code>), then contiguous substring as a final fallback for cases like <code>SFV4S3G</code>.</li>
   <li><em>Reject</em> suppresses re-suggestion on future imports for that prefix.</li>
   <li>Some genuine model renames (e.g. plan says <code>Cross 450</code> but Ducati now calls it <code>Desmo450 MX</code>) will never auto-match — those need a one-time manual mapping. They stick once you save them.</li>
+  <li><strong>Auto-save</strong>: changing the plan-model or status dropdown saves immediately and flashes the row green ("✓ Saved"). No page reload. The Save button still works as a fallback if JS fails.</li>
+  <li><strong>Duplicate warning</strong>: if more than one material prefix maps to the same plan model, a banner at the top of the Mapping page lists them — usually a sign the matcher picked too generic. Re-point each prefix to its more-specific plan model.</li>
   <li><strong>Danger zone</strong> at the bottom of the Mapping page lets you wipe all mappings (with a backup) and re-run auto-suggest from scratch — useful for testing the suggester.</li>
 </ul>
 
