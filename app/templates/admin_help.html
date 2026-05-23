@@ -156,7 +156,7 @@
 <!-- ============================================================ -->
 <h2>Roadmap / under discussion</h2>
 <ul>
-  <li><span class="status-badge status-progress">In progress</span> <strong>Sharpen auto-suggest precision.</strong> Current matcher gets ~60% of unmapped prefixes correctly. Some genuine renames (Cross 450 ↔ Desmo450 MX, Enduro 450 ↔ Desmo450 EDS) need either a Ducati synonym list or one-off manual mappings — TBD with Ross.</li>
+  <li><span class="status-badge status-progress">In progress</span> <strong>Genuine model renames</strong>. The plan workbook still uses old names (<code>Cross 450</code>, <code>Enduro 450</code>) for bikes Ducati now markets as <code>Desmo450 MX</code> / <code>Desmo450 EDS</code> / etc. No text matcher will bridge these — they need either a Ducati-supplied synonym list or one-off manual mappings (which stick).</li>
   <li><span class="status-badge status-progress">In progress</span> <strong>Email-to-webhook ingest go-live</strong>. Endpoint built and locally tested; needs Vercel env var + CloudMailin account + Outlook rule.</li>
   <li><span class="status-badge status-planned">Planned</span> <strong>Auto-clear allocations at month boundary</strong> if no plan re-upload has happened. Currently allocations persist until a new plan upload — which means a missed plan upload leaves stale allocations counting against the new month.</li>
   <li><span class="status-badge status-planned">Planned</span> <strong>Ducati master SKU file</strong>. If Ross can source a canonical SKU → model-name list from Ducati, the fuzzy matcher becomes unnecessary and mappings become deterministic.</li>
@@ -171,6 +171,7 @@
   <li><strong>Forgot the admin password</strong> — open the Supabase project's SQL editor and run: <code>UPDATE settings SET value='new-password' WHERE key='admin_password';</code></li>
   <li><strong>Clean reset</strong> — Supabase SQL editor: <code>TRUNCATE plan, orders, allocations, allocation_reports;</code> then re-upload. Dealers, embargoes and mapping stay intact.</li>
   <li><strong>Debug the auto-suggester</strong> — open <code>{{ request.url_root }}dashboard/admin/mapping/dump</code> for a plain-text dump of every prefix, its current/proposed mapping, the bike super/model from orders, and a list of every plan_super/plan_model pair.</li>
+  <li><strong>Auto-save isn't flashing green</strong> — open the browser console (F12). The JS logs an explicit error if the form-association lookup fails. The Save button still works as a fallback; submit manually until the underlying issue is sorted.</li>
 </ul>
 
 <!-- ============================================================ -->
