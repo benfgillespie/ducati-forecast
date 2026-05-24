@@ -10,3 +10,4 @@ app/data/uploads/
 *.csv
 .env
 .vercel
+.DS_Store
