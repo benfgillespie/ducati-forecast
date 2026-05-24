@@ -296,7 +296,13 @@ def group_concat_distinct(col: str) -> str:
 
 def _connect():
     if USE_POSTGRES:
-        return psycopg.connect(DATABASE_URL, row_factory=dict_row, autocommit=False)
+        conn = psycopg.connect(DATABASE_URL, row_factory=dict_row, autocommit=False)
+        # Disable psycopg3's automatic prepared-statement cache: the Vercel/Neon/
+        # Supabase poolers run PgBouncer in transaction mode, which recycles backend
+        # connections between clients. The client thinks "_pg3_N" already exists on
+        # this session, but the new backend has never seen it — DuplicatePreparedStatement.
+        conn.prepare_threshold = None
+        return conn
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(SQLITE_PATH)
     con.row_factory = sqlite3.Row
