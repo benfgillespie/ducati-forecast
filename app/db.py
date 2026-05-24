@@ -142,6 +142,14 @@ CREATE TABLE IF NOT EXISTS allocation_reports (
     filename TEXT,
     row_count INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY,
+    submitted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    submitter TEXT,
+    page TEXT,
+    message TEXT NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0
+);
 """
 
 _POSTGRES_SCHEMA = """
@@ -243,6 +251,14 @@ CREATE TABLE IF NOT EXISTS allocation_reports (
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     filename TEXT,
     row_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS feedback (
+    id BIGSERIAL PRIMARY KEY,
+    submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    submitter TEXT,
+    page TEXT,
+    message TEXT NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0
 );
 """
 

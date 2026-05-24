@@ -19,6 +19,7 @@
           <a href="{{ url_for('admin_embargoes') }}" class="mr-3 hover:underline">Embargoes</a>
           <a href="{{ url_for('admin_dealers') }}" class="mr-3 hover:underline">Dealers</a>
           <a href="{{ url_for('admin_preview_dealer') }}" class="mr-3 hover:underline">Dealer view</a>
+          <a href="{{ url_for('admin_feedback') }}" class="mr-3 hover:underline">Feedback</a>
           <a href="{{ url_for('admin_help') }}" class="mr-3 hover:underline">Help</a>
           <a href="{{ url_for('logout') }}" class="text-slate-500 hover:underline">Log out</a>
         {% elif session.get('dealer_pw') %}
@@ -42,5 +43,93 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
+
+  <button id="fb-open" type="button"
+          class="fixed bottom-4 right-4 z-40 bg-slate-800 text-white text-sm rounded-full shadow-lg px-4 py-2 hover:bg-slate-700 flex items-center gap-2">
+    <span aria-hidden="true">💬</span> Feedback
+  </button>
+
+  <div id="fb-modal" class="hidden fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center px-4">
+    <div class="bg-white rounded shadow-lg w-full max-w-md p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-slate-800">Leave feedback</h2>
+        <button id="fb-close" type="button" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+      </div>
+      <p class="text-xs text-slate-500 mb-2">Anything that's broken, confusing, or missing — let us know.</p>
+      <form id="fb-form" action="{{ url_for('submit_feedback') }}" method="post">
+        <input type="hidden" name="page" id="fb-page" value="">
+        <textarea name="message" id="fb-message" required rows="5" maxlength="5000"
+                  placeholder="Your feedback…"
+                  class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"></textarea>
+        <div id="fb-status" class="text-xs mt-2 min-h-[1em]"></div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button type="button" id="fb-cancel" class="text-sm text-slate-500 hover:underline">Cancel</button>
+          <button type="submit" id="fb-submit" class="bg-slate-800 text-white text-sm rounded px-3 py-1.5 hover:bg-slate-700">Send</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      var modal   = document.getElementById('fb-modal');
+      var openBtn = document.getElementById('fb-open');
+      var closeBtn= document.getElementById('fb-close');
+      var cancel  = document.getElementById('fb-cancel');
+      var form    = document.getElementById('fb-form');
+      var msg     = document.getElementById('fb-message');
+      var page    = document.getElementById('fb-page');
+      var status  = document.getElementById('fb-status');
+      var submit  = document.getElementById('fb-submit');
+
+      function show() {
+        page.value = window.location.pathname + window.location.search;
+        status.textContent = '';
+        status.className = 'text-xs mt-2 min-h-[1em]';
+        modal.classList.remove('hidden');
+        setTimeout(function(){ msg.focus(); }, 0);
+      }
+      function hide() {
+        modal.classList.add('hidden');
+        msg.value = '';
+      }
+
+      openBtn.addEventListener('click', show);
+      closeBtn.addEventListener('click', hide);
+      cancel.addEventListener('click', hide);
+      modal.addEventListener('click', function(e) { if (e.target === modal) hide(); });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) hide();
+      });
+
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!msg.value.trim()) return;
+        submit.disabled = true;
+        status.textContent = 'Sending…';
+        status.className = 'text-xs mt-2 min-h-[1em] text-slate-500';
+        var data = new FormData(form);
+        fetch(form.action, { method: 'POST', body: data })
+          .then(function(r) { return r.json().catch(function(){ return { ok: r.ok }; }); })
+          .then(function(j) {
+            submit.disabled = false;
+            if (j && j.ok) {
+              status.textContent = 'Thanks — feedback sent.';
+              status.className = 'text-xs mt-2 min-h-[1em] text-emerald-700';
+              msg.value = '';
+              setTimeout(hide, 1200);
+            } else {
+              status.textContent = 'Sorry — something went wrong. Try again?';
+              status.className = 'text-xs mt-2 min-h-[1em] text-rose-700';
+            }
+          })
+          .catch(function() {
+            submit.disabled = false;
+            status.textContent = 'Sorry — something went wrong. Try again?';
+            status.className = 'text-xs mt-2 min-h-[1em] text-rose-700';
+          });
+      });
+    })();
+  </script>
 </body>
 </html>

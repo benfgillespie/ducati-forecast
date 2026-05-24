@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-xl font-semibold">Feedback {% if open_count %}<span class="text-sm font-normal text-slate-500">— {{ open_count }} open</span>{% endif %}</h1>
+  <div class="text-sm">
+    <a href="{{ url_for('admin_feedback', show='open') }}"
+       class="mr-3 {% if show != 'all' %}font-semibold text-slate-800{% else %}text-slate-500 hover:underline{% endif %}">Open</a>
+    <a href="{{ url_for('admin_feedback', show='all') }}"
+       class="{% if show == 'all' %}font-semibold text-slate-800{% else %}text-slate-500 hover:underline{% endif %}">All</a>
+  </div>
+</div>
+
+{% if not rows %}
+  <p class="text-sm text-slate-500">No feedback {% if show != 'all' %}open{% endif %} yet.</p>
+{% else %}
+  <ul class="space-y-3">
+    {% for r in rows %}
+    <li class="bg-white border border-slate-200 rounded p-4 {% if r.resolved %}opacity-60{% endif %}">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="text-xs text-slate-500 mb-1">
+            <span class="font-mono">{{ r.submitted_at }}</span>
+            <span class="ml-2">{{ r.submitter or 'anonymous' }}</span>
+            {% if r.page %}<span class="ml-2">on <span class="font-mono">{{ r.page }}</span></span>{% endif %}
+            {% if r.resolved %}<span class="ml-2 text-emerald-700">✓ resolved</span>{% endif %}
+          </div>
+          <div class="text-sm text-slate-800 whitespace-pre-wrap break-words">{{ r.message }}</div>
+        </div>
+        <div class="flex flex-col gap-1 items-end whitespace-nowrap">
+          <form method="post" action="{{ url_for('admin_feedback_resolve') }}">
+            <input type="hidden" name="id" value="{{ r.id }}">
+            <input type="hidden" name="show" value="{{ show }}">
+            {% if r.resolved %}
+              <input type="hidden" name="reopen" value="1">
+              <button class="text-xs text-slate-600 hover:underline">Reopen</button>
+            {% else %}
+              <button class="text-xs bg-emerald-700 text-white rounded px-2 py-1 hover:bg-emerald-600">Resolve</button>
+            {% endif %}
+          </form>
+          <form method="post" action="{{ url_for('admin_feedback_delete') }}"
+                onsubmit="return confirm('Delete this feedback?');">
+            <input type="hidden" name="id" value="{{ r.id }}">
+            <input type="hidden" name="show" value="{{ show }}">
+            <button class="text-xs text-rose-600 hover:underline">Delete</button>
+          </form>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+{% endif %}
+{% endblock %}

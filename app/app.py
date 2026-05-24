@@ -163,6 +163,30 @@ def logout():
     return redirect(url_for("login"))
 
 
+# ----- feedback widget ------------------------------------------------
+
+@app.route("/feedback", methods=["POST"])
+def submit_feedback():
+    message = (request.form.get("message") or "").strip()
+    if not message:
+        return jsonify(ok=False, error="empty"), 400
+    if len(message) > 5000:
+        message = message[:5000]
+    page = (request.form.get("page") or "").strip()[:500] or None
+    if is_admin():
+        submitter = "admin"
+    else:
+        dealer = current_dealer()
+        submitter = f"dealer:{dealer['name']}" if dealer else "anonymous"
+    con = db.get_conn()
+    con.execute(
+        "INSERT INTO feedback(submitter, page, message) VALUES(?,?,?)",
+        (submitter, page, message),
+    )
+    con.commit()
+    return jsonify(ok=True)
+
+
 # ----- dealer view ----------------------------------------------------
 
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -183,10 +207,21 @@ def _rolling_months(start=None, n=12):
     return out
 
 
+def _dealer_months_visible():
+    """How many month columns dealers see (admin-configurable, 1–12).
+    The forecast math + 'Soonest' calculation always use the full 12 months;
+    this only affects column rendering on the dealer view."""
+    try:
+        n = int(db.get_setting("dealer_months_visible") or 12)
+    except (TypeError, ValueError):
+        n = 12
+    return max(1, min(12, n))
+
+
 @app.route("/dealer")
 @dealer_required
 def dealer_view():
-    return _render_dealer(current_dealer())
+    return _render_dealer(current_dealer(), is_admin_view=False)
 
 
 @app.route("/admin/preview-dealer")
@@ -194,14 +229,17 @@ def dealer_view():
 def admin_preview_dealer():
     # synthetic dealer so the template renders; own-orders panel stays empty
     fake = {"name": "Admin preview", "country": "UK", "dealer_code": None}
-    return _render_dealer(fake)
+    return _render_dealer(fake, is_admin_view=True)
 
 
-def _render_dealer(dealer):
+def _render_dealer(dealer, is_admin_view=False):
     con = db.get_conn()
 
     months = _rolling_months(n=12)
     months_keys = [(y, m) for (y, m) in months]
+    # Dealers see only the first N months; admin preview always sees all 12.
+    visible_n = 12 if is_admin_view else _dealer_months_visible()
+    visible_months = months[:visible_n]
 
     # DUK-wide forecast: read the DUK_26 / DUK_27 rollup sheets directly (Ross sometimes
     # adjusts these manually so they don't equal the UK + SWE + NOR sum).
@@ -361,7 +399,8 @@ def _render_dealer(dealer):
             "committed_by_type": committed_by_type.get(p_model, {}),
         }
         rows.append({"plan_super": super_for.get(p_model), "plan_model": p_model,
-                     "cells": cells, "soonest": soonest, "story": story})
+                     "cells": cells, "visible_cells": cells[:visible_n],
+                     "soonest": soonest, "story": story})
 
     # dealer's own committed orders (skipped for the synthetic admin preview)
     own_orders = []
@@ -383,6 +422,8 @@ def _render_dealer(dealer):
         dealer=dealer,
         rows=rows,
         months=months,
+        visible_months=visible_months,
+        is_admin_view=is_admin_view,
         month_names=MONTH_NAMES,
         own_orders=own_orders,
         last_import=last_import["imported_at"] if last_import else None,
@@ -1552,8 +1593,10 @@ def admin_dealers():
         "WHERE dealer_code IS NOT NULL ORDER BY dealer"
     ).fetchall()
     admin_pw = db.get_setting("admin_password")
+    months_visible = _dealer_months_visible()
     return render_template("admin_dealers.html", rows=rows, dealer_codes=dealer_codes,
-                           countries=KNOWN_COUNTRIES, admin_pw=admin_pw)
+                           countries=KNOWN_COUNTRIES, admin_pw=admin_pw,
+                           months_visible=months_visible)
 
 
 @app.route("/admin/dealers/save", methods=["POST"])
@@ -1608,6 +1651,65 @@ def admin_set_admin_password():
     db.set_setting("admin_password", new_pw)
     flash("Admin password updated.", "ok")
     return redirect(url_for("admin_dealers"))
+
+
+@app.route("/admin/dealers/months_visible", methods=["POST"])
+@admin_required
+def admin_set_months_visible():
+    try:
+        n = int(request.form.get("months_visible", "").strip())
+    except ValueError:
+        flash("Pick a number between 1 and 12.", "error")
+        return redirect(url_for("admin_dealers"))
+    if not 1 <= n <= 12:
+        flash("Pick a number between 1 and 12.", "error")
+        return redirect(url_for("admin_dealers"))
+    db.set_setting("dealer_months_visible", str(n))
+    flash(f"Dealers now see the next {n} month{'s' if n != 1 else ''}.", "ok")
+    return redirect(url_for("admin_dealers"))
+
+
+# ----- admin: feedback inbox ------------------------------------------
+
+@app.route("/admin/feedback")
+@admin_required
+def admin_feedback():
+    show = request.args.get("show", "open")
+    where = "WHERE resolved=0" if show != "all" else ""
+    rows = db.get_conn().execute(
+        f"SELECT id, submitted_at, submitter, page, message, resolved "
+        f"FROM feedback {where} "
+        f"ORDER BY id DESC"
+    ).fetchall()
+    open_count = db.get_conn().execute(
+        "SELECT COUNT(*) AS c FROM feedback WHERE resolved=0"
+    ).fetchone()["c"]
+    return render_template(
+        "admin_feedback.html",
+        rows=rows,
+        show=show,
+        open_count=open_count,
+    )
+
+
+@app.route("/admin/feedback/resolve", methods=["POST"])
+@admin_required
+def admin_feedback_resolve():
+    fid = request.form.get("id")
+    resolved = 0 if request.form.get("reopen") else 1
+    con = db.get_conn()
+    con.execute("UPDATE feedback SET resolved=? WHERE id=?", (resolved, fid))
+    con.commit()
+    return redirect(url_for("admin_feedback", show=request.form.get("show") or "open"))
+
+
+@app.route("/admin/feedback/delete", methods=["POST"])
+@admin_required
+def admin_feedback_delete():
+    con = db.get_conn()
+    con.execute("DELETE FROM feedback WHERE id=?", (request.form.get("id"),))
+    con.commit()
+    return redirect(url_for("admin_feedback", show=request.form.get("show") or "open"))
 
 
 if __name__ == "__main__":

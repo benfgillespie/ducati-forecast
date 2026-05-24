@@ -3,7 +3,8 @@
 <div class="mb-4">
   <h1 class="text-xl font-semibold">{{ dealer.name }}</h1>
   <p class="text-sm text-slate-500">
-    Currently expected availability over the next 12 months, across UK / Sweden / Norway combined.
+    Currently expected availability over the next {{ visible_months|length }} month{{ 's' if visible_months|length != 1 else '' }}, across UK / Sweden / Norway combined.
+    'Soonest' looks ahead over the next 12 months.
     Numbers are estimates and may shift week-to-week.
     {% if last_import %}Data refreshed {{ last_import }}.{% endif %}
   </p>
@@ -21,7 +22,7 @@
       <tr>
         <th class="text-left px-3 py-2 sticky left-0 bg-slate-100">Model</th>
         <th class="text-left px-3 py-2">Soonest</th>
-        {% for (y, m) in months %}
+        {% for (y, m) in visible_months %}
           <th class="px-2 py-2 text-center" title="{{ y }}">{{ month_names[m-1] }}<br><span class="text-xs text-slate-400">'{{ y % 100 }}</span></th>
         {% endfor %}
       </tr>
@@ -29,16 +30,16 @@
     <tbody>
       {% for r in rows %}
       {% set story_id = "story-" ~ loop.index %}
-      <tr class="border-t border-slate-100 cursor-pointer hover:bg-slate-50"
-          onclick="(function(el){
+      <tr class="border-t border-slate-100 {% if is_admin_view %}cursor-pointer hover:bg-slate-50{% endif %}"
+          {% if is_admin_view %}onclick="(function(el){
             var s = document.getElementById('{{ story_id }}');
             var c = document.getElementById('{{ story_id }}-chev');
             if (s.classList.contains('hidden')) { s.classList.remove('hidden'); c.textContent = '▾'; }
             else { s.classList.add('hidden'); c.textContent = '▸'; }
-          })(this); event.stopPropagation();">
+          })(this); event.stopPropagation();"{% endif %}>
         <td class="px-3 py-2 sticky left-0 bg-white">
           <div class="font-medium flex items-center gap-1.5">
-            <span id="{{ story_id }}-chev" class="text-slate-400 text-xs select-none">▸</span>
+            {% if is_admin_view %}<span id="{{ story_id }}-chev" class="text-slate-400 text-xs select-none">▸</span>{% endif %}
             <span>{{ r.plan_model }}</span>
           </div>
           <div class="text-xs text-slate-400 ml-4">{{ r.plan_super }}</div>
@@ -50,7 +51,7 @@
             <span class="text-rose-600 text-xs">none in window</span>
           {% endif %}
         </td>
-        {% for cell in r.cells %}
+        {% for cell in r.visible_cells %}
           {% set v = cell.available %}
           <td class="px-2 py-2 text-center align-middle"
               title="forecast {{ cell.forecast }} − allocated {{ cell.allocated }} − committed {{ cell.committed }} = {{ v }}">
@@ -62,8 +63,9 @@
           </td>
         {% endfor %}
       </tr>
+      {% if is_admin_view %}
       <tr id="{{ story_id }}" class="hidden bg-slate-50">
-        <td colspan="14" class="px-5 py-4 border-l-4 border-slate-300">
+        <td colspan="{{ visible_months|length + 2 }}" class="px-5 py-4 border-l-4 border-slate-300">
           <div class="text-xs text-slate-500 mb-3">
             <strong class="text-slate-700">{{ r.plan_model }}</strong>
             <span class="text-slate-400">{{ r.plan_super }}</span>
@@ -140,8 +142,9 @@
           </div>
         </td>
       </tr>
+      {% endif %}
       {% else %}
-      <tr><td colspan="14" class="px-3 py-6 text-center text-slate-500">
+      <tr><td colspan="{{ visible_months|length + 2 }}" class="px-3 py-6 text-center text-slate-500">
         No data yet — ask the admin to upload the plan and orders files.
       </td></tr>
       {% endfor %}

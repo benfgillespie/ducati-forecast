@@ -81,13 +81,31 @@
   </table>
 </div>
 
-<div class="bg-white border border-slate-200 rounded p-4 max-w-md">
-  <h2 class="font-medium mb-2">Admin password</h2>
-  <form method="post" action="{{ url_for('admin_set_admin_password') }}" class="flex gap-2">
-    <input name="admin_password" value="{{ admin_pw }}" required
-           class="border border-slate-300 rounded px-2 py-1 text-sm flex-1">
-    <button class="bg-slate-800 text-white text-sm rounded px-3 py-1 hover:bg-slate-700">Update</button>
-  </form>
-  <p class="text-xs text-slate-400 mt-1">Used to log in to this admin area.</p>
+<div class="grid md:grid-cols-2 gap-4 max-w-3xl">
+  <div class="bg-white border border-slate-200 rounded p-4">
+    <h2 class="font-medium mb-2">Admin password</h2>
+    <form method="post" action="{{ url_for('admin_set_admin_password') }}" class="flex gap-2">
+      <input name="admin_password" value="{{ admin_pw }}" required
+             class="border border-slate-300 rounded px-2 py-1 text-sm flex-1">
+      <button class="bg-slate-800 text-white text-sm rounded px-3 py-1 hover:bg-slate-700">Update</button>
+    </form>
+    <p class="text-xs text-slate-400 mt-1">Used to log in to this admin area.</p>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded p-4">
+    <h2 class="font-medium mb-2">Months shown to dealers</h2>
+    <form method="post" action="{{ url_for('admin_set_months_visible') }}" class="flex gap-2 items-center">
+      <select name="months_visible" class="border border-slate-300 rounded px-2 py-1 text-sm">
+        {% for n in range(1, 13) %}
+          <option value="{{ n }}" {% if n == months_visible %}selected{% endif %}>{{ n }} month{{ 's' if n != 1 else '' }}</option>
+        {% endfor %}
+      </select>
+      <button class="bg-slate-800 text-white text-sm rounded px-3 py-1 hover:bg-slate-700">Save</button>
+    </form>
+    <p class="text-xs text-slate-400 mt-1">
+      How many month columns dealers see in their availability table.
+      'Soonest' still looks ahead 12 months regardless.
+    </p>
+  </div>
 </div>
 {% endblock %}
