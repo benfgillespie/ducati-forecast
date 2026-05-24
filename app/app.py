@@ -224,12 +224,20 @@ def dealer_view():
     return _render_dealer(current_dealer(), is_admin_view=False)
 
 
-@app.route("/admin/preview-dealer")
+@app.route("/admin/forecast")
 @admin_required
-def admin_preview_dealer():
-    # synthetic dealer so the template renders; own-orders panel stays empty
-    fake = {"name": "Admin preview", "country": "UK", "dealer_code": None}
+def admin_forecast():
+    # admin's full analytical view: all 12 months + per-row story drill-down
+    fake = {"name": "Admin forecast", "country": "UK", "dealer_code": None}
     return _render_dealer(fake, is_admin_view=True)
+
+
+@app.route("/admin/dealer-view")
+@admin_required
+def admin_dealer_view():
+    # mirrors exactly what a dealer sees (truncated months, no story panel)
+    fake = {"name": "Dealer view (admin)", "country": "UK", "dealer_code": None}
+    return _render_dealer(fake, is_admin_view=False)
 
 
 def _render_dealer(dealer, is_admin_view=False):
