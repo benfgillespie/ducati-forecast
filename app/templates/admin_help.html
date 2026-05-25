@@ -20,7 +20,7 @@
 </style>
 
 <h1>Dashboard README</h1>
-<p class="updated">Maintained: 2026-05-23 — features and status below reflect the current build.</p>
+<p class="updated">Maintained: 2026-05-25 — features and status below reflect the current build.</p>
 
 <p>
   A small internal portal that shows dealers across the UK, Sweden and Norway when
@@ -69,7 +69,7 @@
   fill remaining capacity FIFO by order creation date. Overflow piles onto the last
   month, so negative <em>available</em> numbers signal an overcommit.
 </p>
-<p>Hover any cell on the dealer view for a per-month breakdown. <strong>Click any row</strong> for a full per-model "story": material prefixes feeding in, 12-month totals, allocations broken down by country, committed orders broken down by type, and a numeric per-month table.</p>
+<p>Hover any cell for a per-month breakdown. The admin <strong>Forecast</strong> view also lets you <strong>click any row</strong> for a full per-model "story": material prefixes feeding in, 12-month totals, allocations broken down by country, committed orders broken down by type, and a numeric per-month table. Dealers don't see the story panel.</p>
 
 <h4>Traffic-light dots</h4>
 <ul>
@@ -112,7 +112,34 @@
 <p>
   <strong>Admin → Dealers</strong> manages per-dealer passwords. Each dealer is bound
   to a country (UK / SWE / NOR) and a dealer code — the code is what makes their own
-  committed orders show on their page. The admin password lives at the bottom.
+  committed orders show on their page. The admin password and the
+  <em>Months shown to dealers</em> control (1–12) live at the bottom.
+</p>
+<p>
+  The months-visible setting only affects how many column months dealers see on their
+  grid; the forecast math and the "Soonest" calculation always look ahead a full 12
+  months regardless. Useful when you want to keep dealers focused on the near term
+  without changing the underlying numbers.
+</p>
+
+<h3>Forecast vs Dealer view <span class="status-badge status-live">Live</span></h3>
+<p>The admin nav has two read-only views of the availability grid:</p>
+<ul>
+  <li><strong>Forecast</strong> — your analytical view. All 12 months, plus the per-row "story" drill-down on row-click. Use this to investigate why a number is what it is.</li>
+  <li><strong>Dealer view</strong> — mirrors exactly what a dealer sees: truncated to the months-visible setting, no story panel. Use this to spot-check before a dealer logs in.</li>
+</ul>
+
+<h3>Feedback inbox <span class="status-badge status-live">Live</span></h3>
+<p>
+  Every page has a <strong>💬 Feedback</strong> button bottom-right. Dealers and the
+  admin can use it to send a short message; the current page URL is captured
+  automatically so context isn't lost.
+</p>
+<p>
+  Read submissions at <strong>Admin → Feedback</strong>. Default view is open items
+  only; toggle to <em>All</em> to see resolved ones. Each row can be marked resolved,
+  reopened, or deleted. Submitter is tagged as <code>admin</code>,
+  <code>dealer:&lt;name&gt;</code>, or <code>anonymous</code> if neither session was active.
 </p>
 
 <h3>Notifications on the admin home <span class="status-badge status-live">Live</span></h3>
