@@ -20,7 +20,7 @@
 </style>
 
 <h1>Dashboard README</h1>
-<p class="updated">Maintained: 2026-05-25 — features and status below reflect the current build.</p>
+<p class="updated">Maintained: 2026-06-11 — features and status below reflect the current build.</p>
 
 <p>
   A small internal portal that shows dealers across the UK, Sweden and Norway when
@@ -49,7 +49,7 @@
 <ul>
   <li><strong>Plan workbook</strong> — typically refreshed monthly. Each upload <em>replaces</em> the plan and <em>wipes the allocations table</em> (a new plan = new accounting period).</li>
   <li><strong>Orders export</strong> — open orders only. Each upload replaces the orders table.</li>
-  <li><strong>Allocations</strong> — bikes already delivered and dropped off the orders sheet. <em>Cumulative</em> across uploads, deduped by order number. Twice-a-day cadence is expected. Two file shapes are accepted:
+  <li><strong>Allocations</strong> — bikes that have been allocated. A bike's life is forecast → open order → allocated; once allocated it drops off the orders sheet and appears here, so allocations and open orders are the same bikes at different stages and are added together, never double-counted. <em>Cumulative</em> across uploads within an accounting period, deduped by order number. Twice-a-day cadence is expected. Two file shapes are accepted:
     <ul>
       <li><strong>Single-period file</strong> — filename pattern <code>Allocations DD.MM.YY am|pm.xlsx</code>. The date is read from the filename.</li>
       <li><strong>Master workbook</strong> — one sheet per period, sheet names like <code>22.05.26 pm</code>. The system walks every dated sheet chronologically and ingests each as its own report. Re-uploading a master is safe: dedup-by-order-number keeps the data clean.</li>
@@ -58,20 +58,37 @@
 </ul>
 
 <h3>Availability math <span class="status-badge status-live">Live</span></h3>
-<p>For each (model, month) cell on the dealer grid:</p>
-<pre>available[month] = forecast[month]
-                 − allocated[month]     (off the front of the forecast)
-                 − committed[month]     (open orders FIFO, then overflow)</pre>
+<p>For each (model, month) cell, start from the raw monthly position:</p>
+<pre>raw[month] = forecast[month]
+           − allocated[month]     (off the front of the forecast)
+           − committed[month]     (open orders FIFO, then overflow)</pre>
 <p>
   Allocations come off first: walk months chronologically and subtract from each
   month's forecast until the allocations count is exhausted; excess spills to the
   next month. Then committed orders (Demo / Courtesy / End-customer-status=Yes)
   fill remaining capacity FIFO by order creation date. Overflow piles onto the last
-  month, so negative <em>available</em> numbers signal an overcommit.
+  month.
 </p>
-<p>Hover any cell for a per-month breakdown. The admin <strong>Forecast</strong> view also lets you <strong>click any row</strong> for a full per-model "story": material prefixes feeding in, 12-month totals, allocations broken down by country, committed orders broken down by type, and a numeric per-month table. Dealers don't see the story panel.</p>
+<p>
+  <strong>Roll-forward.</strong> Bikes forecast but not taken in a month don't vanish
+  at month-end — they carry into later months. So the figure that drives the traffic
+  light is the <em>running total</em> of <code>raw</code> from the first month up to
+  that month, not the month on its own. A model whose forecast runs out mid-window
+  keeps showing availability (rather than going red) for as long as unsold stock
+  remains. Because allocations and orders fill earliest-first, the running total only
+  goes negative when a model is genuinely overcommitted overall — which is what a red
+  dot then signals.
+</p>
+<p>
+  <strong>No double-counting.</strong> Allocated and committed are the same bikes at
+  different stages (see Upload → Allocations). If a feed-timing gap leaves an order
+  showing in both feeds, the allocation wins and the order is skipped, so the bike is
+  subtracted once, not twice.
+</p>
+<p>Hover any cell for a per-month breakdown — it shows both the rolled-forward figure and the raw monthly <code>forecast − allocated − committed</code>. The admin <strong>Forecast</strong> view also lets you <strong>click any row</strong> for a full per-model "story": material prefixes feeding in, 12-month totals, allocations broken down by country, committed orders broken down by type, and a numeric per-month table with a <strong>Roll-fwd</strong> column. Dealers don't see the story panel.</p>
 
 <h4>Traffic-light dots</h4>
+<p>Driven by the rolled-forward (cumulative) available figure:</p>
 <ul>
   <li><span class="inline-block w-3 h-3 rounded-full bg-emerald-500 align-middle"></span> &nbsp; ≥ 10 available — comfortably open.</li>
   <li><span class="inline-block w-3 h-3 rounded-full bg-amber-400 align-middle"></span> &nbsp; 1–9 available — limited.</li>
@@ -82,7 +99,11 @@
 <p>
   Orders join to plan rows by the leading token of each order's <code>Material</code>
   column (e.g. <code>MSV4S</code> → <code>MTS V4 S / MTS V4 S MTO</code>). Unmapped
-  prefixes are excluded from dealer availability until you assign them.
+  prefixes are excluded from dealer availability until you assign them — this applies
+  to <strong>both orders and allocations</strong>. Unmapped allocation prefixes used to
+  be dropped silently; now they raise an "<em>N allocation(s) couldn't be matched</em>"
+  banner on the Forecast / Dealer view and show with an <strong>Allocations</strong>
+  count (amber when unmapped) on the Mapping page.
 </p>
 <p>
   <strong>Auto-suggest</strong>: on every import, the dashboard scans unmapped
