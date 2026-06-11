@@ -264,7 +264,7 @@ def _render_dealer(dealer, is_admin_view=False):
     # All open Demo / Courtesy / End-customer orders across UK, SWE, NOR.
     # Sorted by order creation date so the FIFO allocation below is deterministic.
     order_rows = con.execute(
-        "SELECT o.material_prefix, o.bike_type, o.end_customer_status, "
+        "SELECT o.order_number, o.material_prefix, o.bike_type, o.end_customer_status, "
         "       o.order_creation_date, mm.plan_super, mm.plan_model "
         "FROM orders o "
         "LEFT JOIN material_map mm ON mm.material_prefix = o.material_prefix "
@@ -272,6 +272,19 @@ def _render_dealer(dealer, is_admin_view=False):
         "  AND ( o.bike_type IN ('Demo','Courtesy') OR o.end_customer_status='Yes' ) "
         "ORDER BY COALESCE(o.order_creation_date, '9999-12-31'), o.material_prefix"
     ).fetchall()
+
+    # A bike's lifecycle is: forecast -> open order -> allocated. Once allocated it
+    # should drop off the orders sheet and appear on the allocations sheet — it's
+    # the SAME bike, so allocated + open-orders are meant to be disjoint. When the
+    # two feeds are uploaded at slightly different times an order can briefly show
+    # in both; counting it as allocated AND committed would subtract it twice. Treat
+    # the allocation as the source of truth and skip any order already allocated.
+    allocated_order_numbers = {
+        r["order_number"] for r in con.execute(
+            "SELECT DISTINCT order_number FROM allocations "
+            "WHERE order_number IS NOT NULL AND order_number <> ''"
+        ).fetchall()
+    }
 
     # Allocations: bikes already delivered (off the orders sheet) — counted as
     # consumed from forecast capacity, off the FRONT of the queue.
@@ -288,6 +301,16 @@ def _render_dealer(dealer, is_admin_view=False):
         pm = r["plan_model"]
         alloc_total[pm] = alloc_total.get(pm, 0) + r["n"]
         alloc_by_country.setdefault(pm, {})[r["country"]] = r["n"]
+
+    # Allocations whose material prefix isn't mapped to a plan model are excluded
+    # from the figures above entirely — a silent undercount. Count them so the
+    # view can warn, mirroring the unmapped-orders notice.
+    unmapped_allocations = con.execute(
+        "SELECT COUNT(*) AS c FROM allocations a "
+        "LEFT JOIN material_map mm ON mm.material_prefix = a.material_prefix "
+        "WHERE a.country IN ('UK','SWE','NOR') "
+        "  AND (mm.plan_model IS NULL OR mm.material_prefix IS NULL)"
+    ).fetchone()["c"]
 
     # Material prefixes mapped to each plan_model — surfaces the join for
     # the per-model story panel.
@@ -318,8 +341,13 @@ def _render_dealer(dealer, is_admin_view=False):
         super_for.setdefault(key, r["plan_super"])
 
     unmapped_orders = 0
+    orders_already_allocated = 0
     committed_by_type = {}  # plan_model -> {type: count}
     for r in order_rows:
+        if r["order_number"] and r["order_number"] in allocated_order_numbers:
+            # Already on the allocations sheet — counted under 'allocated', not twice.
+            orders_already_allocated += 1
+            continue
         if not r["plan_model"]:
             unmapped_orders += 1
             continue
@@ -445,6 +473,8 @@ def _render_dealer(dealer, is_admin_view=False):
         own_orders=own_orders,
         last_import=last_import["imported_at"] if last_import else None,
         unmapped_orders=unmapped_orders,
+        unmapped_allocations=unmapped_allocations,
+        orders_already_allocated=orders_already_allocated,
     )
 
 
@@ -1223,6 +1253,23 @@ def admin_upload():
             allocations_added += added
             allocations_skipped += skipped
 
+        # Register any new Material prefixes seen in the allocations, so they show
+        # up on the Mapping page and stop being silently dropped from the allocated
+        # figures. Orders did this above; allocations were missing it.
+        seen_alloc_prefixes = {
+            row.get("material_prefix")
+            for _sn, _dt, sheet_rows in resolved_sheets
+            for row in sheet_rows
+            if row.get("material_prefix")
+        }
+        existing_prefixes = {r["material_prefix"] for r in con.execute(
+            "SELECT material_prefix FROM material_map").fetchall()}
+        for p in sorted(seen_alloc_prefixes - existing_prefixes):
+            con.execute(
+                "INSERT INTO material_map(material_prefix, status) VALUES(?, 'unmapped')",
+                (p,),
+            )
+
     # Auto-suggest mappings for unmapped prefixes. Cheap to always run — picks
     # up new prefixes from an orders refresh AND new matches enabled by a plan
     # refresh. Suggestions are proposals only; the admin still confirms.
@@ -1230,7 +1277,8 @@ def admin_upload():
 
     unmapped_total = con.execute(
         "SELECT COUNT(*) AS c FROM material_map WHERE status='unmapped' "
-        "AND material_prefix IN (SELECT DISTINCT material_prefix FROM orders)"
+        "AND (material_prefix IN (SELECT DISTINCT material_prefix FROM orders) "
+        "  OR material_prefix IN (SELECT DISTINCT material_prefix FROM allocations))"
     ).fetchone()["c"]
 
     con.execute(
@@ -1294,6 +1342,7 @@ def admin_mapping():
     rows = con.execute(
         f"SELECT mm.*, "
         f"(SELECT COUNT(*) FROM orders o WHERE o.material_prefix = mm.material_prefix) AS order_count, "
+        f"(SELECT COUNT(*) FROM allocations a WHERE a.material_prefix = mm.material_prefix) AS allocation_count, "
         f"(SELECT {db.group_concat_distinct('bike_super_model')} FROM orders o "
         f"  WHERE o.material_prefix = mm.material_prefix) AS bike_supers, "
         f"(SELECT {db.group_concat_distinct('bike_model')} FROM orders o "

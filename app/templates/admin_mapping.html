@@ -55,6 +55,7 @@
         <th class="text-left px-3 py-2">Prefix</th>
         <th class="text-left px-3 py-2">Bike Model (from orders)</th>
         <th class="text-left px-3 py-2">Orders</th>
+        <th class="text-left px-3 py-2">Allocations</th>
         <th class="text-left px-3 py-2">Plan model</th>
         <th class="text-left px-3 py-2">Status</th>
         <th class="px-3 py-2"></th>
@@ -73,6 +74,7 @@
           <div>{{ r.bike_models or '—' }}</div>
         </td>
         <td class="px-3 py-2 align-top">{{ r.order_count }}</td>
+        <td class="px-3 py-2 align-top {% if r.allocation_count and not r.plan_model %}text-amber-700 font-medium{% endif %}">{{ r.allocation_count }}</td>
         <td class="px-3 py-2 align-top">
           <select name="plan_combo" form="{{ fid }}"
                   onchange="mappingAutoSave(this)"

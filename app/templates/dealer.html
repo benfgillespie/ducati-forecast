@@ -13,6 +13,11 @@
       Note: {{ unmapped_orders }} order(s) couldn't be matched to a plan model and are excluded from the figures.
     </p>
   {% endif %}
+  {% if unmapped_allocations %}
+    <p class="text-xs text-amber-700 mt-1">
+      Note: {{ unmapped_allocations }} allocation(s) couldn't be matched to a plan model and are excluded from the figures.{% if is_admin_view %} Map their prefixes on the Mapping page to count them.{% endif %}
+    </p>
+  {% endif %}
 </div>
 
 <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-2">Availability by model</h2>
