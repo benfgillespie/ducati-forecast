@@ -382,20 +382,29 @@ def _render_dealer(dealer, is_admin_view=False):
         forecast_total = 0
         allocated_total = 0
         committed_total = 0
+        # Bikes forecast but not yet consumed in a month don't vanish at month-end —
+        # they roll into the following months. So the figure that drives the traffic
+        # light is the *cumulative* available (running sum of forecast − allocated −
+        # committed). Because orders fill earliest-month-first and any overflow lands
+        # on the last month, interior months never go negative, so this running total
+        # only dips below zero when the model is genuinely overcommitted overall.
+        cumulative = 0
         for ym in months_keys:
             d = monthly.get(ym, {"forecast": 0, "allocated": 0, "committed": 0})
             available = d["forecast"] - d["allocated"] - d["committed"]
+            cumulative += available
             cells.append({
                 "year": ym[0], "month": ym[1],
                 "forecast": d["forecast"],
                 "allocated": d["allocated"],
                 "committed": d["committed"],
                 "available": available,
+                "cumulative": cumulative,
             })
             forecast_total += d["forecast"]
             allocated_total += d["allocated"]
             committed_total += d["committed"]
-            if soonest is None and available >= 1:
+            if soonest is None and cumulative >= 1:
                 soonest = ym
         story = {
             "prefixes": prefixes_per_model.get(p_model, []),
