@@ -99,7 +99,7 @@
               <div class="text-xs leading-relaxed">
                 <div class="text-slate-500">Allocated by country:</div>
                 {% if r.story.alloc_by_country %}
-                  {% for cc in ['UK','SWE','NOR'] %}
+                  {% for cc in ['UK','SWE','NOR','Other'] %}
                     {% if r.story.alloc_by_country.get(cc) %}
                       <span class="inline-block mr-3">{{ cc }} <span class="font-medium text-slate-700">{{ r.story.alloc_by_country[cc] }}</span></span>
                     {% endif %}

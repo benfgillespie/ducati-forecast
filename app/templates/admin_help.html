@@ -20,7 +20,7 @@
 </style>
 
 <h1>Dashboard README</h1>
-<p class="updated">Maintained: 2026-06-11 — features and status below reflect the current build.</p>
+<p class="updated">Maintained: 2026-06-18 — features and status below reflect the current build.</p>
 
 <p>
   A small internal portal that shows dealers across the UK, Sweden and Norway when
@@ -196,8 +196,8 @@
 <h2>Source data shape</h2>
 <ul>
   <li><strong>Plan workbook</strong> — the parser reads the <em>Sell In</em> block of the <code>DUK_26</code> / <code>DUK_27</code> sheets (column layout auto-detected). Other blocks (Sell Out, Dealer Inventory, Shipment) are ignored.</li>
-  <li><strong>Orders export</strong> — <code>Export</code> sheet, filtered to <code>Order Status Group = Open</code>. The Material column's leading token is the join key. <code>UNITED KINGDOM</code>, <code>CHANNEL ISLANDS</code>, <code>IRELAND</code> all bucket as <code>UK</code>; <code>SWEDEN</code> → <code>SWE</code>; <code>NORWAY</code> → <code>NOR</code>.</li>
-  <li><strong>Allocations</strong> — like the orders Export sheet but with a leading row-ID column and interleaved blank rows. The parser auto-detects the column offset. Filename should match <code>Allocations DD.MM.YY (am|pm).xlsx</code> so the report date is read automatically; an inline date-override field is available if not.</li>
+  <li><strong>Orders export</strong> — <code>Export</code> sheet, filtered to <code>Order Status Group = Open</code> <strong>and to country UK / SWE / NOR</strong> (<code>UNITED KINGDOM</code>, <code>CHANNEL ISLANDS</code>, <code>IRELAND</code> all bucket as <code>UK</code>; <code>SWEDEN</code> → <code>SWE</code>; <code>NORWAY</code> → <code>NOR</code>). The Material column's leading token is the join key.</li>
+  <li><strong>Allocations</strong> — like the orders Export sheet but with a leading row-ID column and interleaved blank rows. The parser auto-detects the column offset. Filename should match <code>Allocations DD.MM.YY (am|pm).xlsx</code> so the report date is read automatically; an inline date-override field is available if not. <strong>Every allocation row is counted regardless of its country value</strong> — unlike orders, allocations are <em>not</em> filtered to UK/SWE/NOR (the sheet's country column is unreliable, sometimes carrying a stray code instead of a country). The story panel buckets UK/SWE/NOR and lumps anything else under <em>Other</em>.</li>
   <li><strong>Customer / dealer columns</strong> — the customer-name column is discarded at parse time for data-protection reasons. Dealer-code is used to filter the per-dealer "Your committed orders" panel.</li>
 </ul>
 

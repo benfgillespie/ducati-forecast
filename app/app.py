@@ -286,30 +286,36 @@ def _render_dealer(dealer, is_admin_view=False):
         ).fetchall()
     }
 
-    # Allocations: bikes already delivered (off the orders sheet) — counted as
-    # consumed from forecast capacity, off the FRONT of the queue.
+    # Allocations: bikes consumed from forecast capacity, off the FRONT of the queue.
+    # EVERY allocation row counts — we deliberately do NOT filter by country. The
+    # allocation sheet's country column is unreliable (some rows carry a stray code
+    # like a dealer/customer number instead of a country), and per Ross anything on
+    # the allocation sheet is a real allocation that should be counted. The breakdown
+    # still buckets UK/SWE/NOR for display and lumps everything else under 'Other'.
     allocation_rows_by_country = con.execute(
         "SELECT mm.plan_model, a.country, COUNT(a.id) AS n "
         "FROM allocations a "
         "JOIN material_map mm ON mm.material_prefix = a.material_prefix "
-        "WHERE a.country IN ('UK','SWE','NOR') AND mm.plan_model IS NOT NULL "
+        "WHERE mm.plan_model IS NOT NULL "
         "GROUP BY mm.plan_model, a.country"
     ).fetchall()
     alloc_total = {}
-    alloc_by_country = {}   # plan_model -> {country: n}
+    alloc_by_country = {}   # plan_model -> {country: n}; non-UK/SWE/NOR -> 'Other'
     for r in allocation_rows_by_country:
         pm = r["plan_model"]
         alloc_total[pm] = alloc_total.get(pm, 0) + r["n"]
-        alloc_by_country.setdefault(pm, {})[r["country"]] = r["n"]
+        bucket = r["country"] if r["country"] in ("UK", "SWE", "NOR") else "Other"
+        by = alloc_by_country.setdefault(pm, {})
+        by[bucket] = by.get(bucket, 0) + r["n"]
 
     # Allocations whose material prefix isn't mapped to a plan model are excluded
     # from the figures above entirely — a silent undercount. Count them so the
-    # view can warn, mirroring the unmapped-orders notice.
+    # view can warn, mirroring the unmapped-orders notice. (No country filter — same
+    # reasoning as above.)
     unmapped_allocations = con.execute(
         "SELECT COUNT(*) AS c FROM allocations a "
         "LEFT JOIN material_map mm ON mm.material_prefix = a.material_prefix "
-        "WHERE a.country IN ('UK','SWE','NOR') "
-        "  AND (mm.plan_model IS NULL OR mm.material_prefix IS NULL)"
+        "WHERE mm.plan_model IS NULL OR mm.material_prefix IS NULL"
     ).fetchone()["c"]
 
     # Material prefixes mapped to each plan_model — surfaces the join for
