@@ -12,6 +12,7 @@
       <div class="font-semibold text-slate-700">Bike availability</div>
       <nav class="text-sm">
         <a href="/" class="mr-3 text-slate-500 hover:underline">← Forecast submission</a>
+        <a href="{{ url_for('home') }}" class="mr-3 hover:underline">Availability</a>
         {% if session.get('admin') %}
           <a href="{{ url_for('admin_home') }}" class="mr-3 hover:underline">Admin</a>
           <a href="{{ url_for('admin_upload') }}" class="mr-3 hover:underline">Upload</a>
@@ -24,7 +25,10 @@
           <a href="{{ url_for('admin_help') }}" class="mr-3 hover:underline">Help</a>
           <a href="{{ url_for('logout') }}" class="text-slate-500 hover:underline">Log out</a>
         {% elif session.get('dealer_pw') %}
+          <a href="{{ url_for('dealer_view') }}" class="mr-3 hover:underline">My orders</a>
           <a href="{{ url_for('logout') }}" class="text-slate-500 hover:underline">Log out</a>
+        {% else %}
+          <a href="{{ url_for('login') }}" class="hover:underline">Log in</a>
         {% endif %}
       </nav>
     </div>

@@ -1,11 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="max-w-sm mx-auto mt-12 bg-white border border-slate-200 rounded p-6 shadow-sm">
-  <h1 class="text-lg font-semibold mb-4">Enter password</h1>
+  <h1 class="text-lg font-semibold mb-1">Log in</h1>
+  <p class="text-sm text-slate-500 mb-4">Enter your admin or dealer password.</p>
   <form method="post" action="{{ url_for('login_post') }}" class="space-y-3">
     <input type="password" name="password" autofocus required
            class="w-full border border-slate-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400">
     <button class="w-full bg-slate-800 text-white rounded py-2 hover:bg-slate-700">Continue</button>
   </form>
+  <p class="text-sm text-slate-500 mt-4">
+    <a href="{{ url_for('home') }}" class="hover:underline">← Back to availability</a>
+  </p>
 </div>
 {% endblock %}

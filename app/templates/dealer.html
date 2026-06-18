@@ -8,14 +8,14 @@
     Numbers are estimates and may shift week-to-week.
     {% if last_import %}Data refreshed {{ last_import }}.{% endif %}
   </p>
-  {% if unmapped_orders %}
+  {% if unmapped_orders and is_admin_view %}
     <p class="text-xs text-amber-700 mt-1">
       Note: {{ unmapped_orders }} order(s) couldn't be matched to a plan model and are excluded from the figures.
     </p>
   {% endif %}
-  {% if unmapped_allocations %}
+  {% if unmapped_allocations and is_admin_view %}
     <p class="text-xs text-amber-700 mt-1">
-      Note: {{ unmapped_allocations }} allocation(s) couldn't be matched to a plan model and are excluded from the figures.{% if is_admin_view %} Map their prefixes on the Mapping page to count them.{% endif %}
+      Note: {{ unmapped_allocations }} allocation(s) couldn't be matched to a plan model and are excluded from the figures. Map their prefixes on the Mapping page to count them.
     </p>
   {% endif %}
 </div>

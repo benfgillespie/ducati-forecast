@@ -25,9 +25,15 @@
 <p>
   A small internal portal that shows dealers across the UK, Sweden and Norway when
   Ducati bikes are likely to be available. The admin uploads the plan workbook, the
-  orders export, and (twice a day) the allocations file; each dealer logs in with a
-  personal password to see a country-wide availability grid plus their own committed
-  orders.
+  orders export, and (twice a day) the allocations file.
+</p>
+<p>
+  The site <strong>opens directly on the general availability grid</strong> — the
+  country-wide view every dealer sees, no password required. A <strong>Log in</strong>
+  item in the top nav takes you to the password page: the <strong>admin password</strong>
+  unlocks the admin tools, and a <strong>dealer's personal password</strong> shows that
+  dealer their own committed orders on top of the shared grid (via the <em>My orders</em>
+  nav link). <em>Logging out returns you to the public availability view.</em>
 </p>
 
 <h2>Status legend</h2>
@@ -103,8 +109,11 @@
   prefixes are excluded from dealer availability until you assign them — this applies
   to <strong>both orders and allocations</strong>. Unmapped allocation prefixes used to
   be dropped silently; now they raise an "<em>N allocation(s) couldn't be matched</em>"
-  banner on the Forecast / Dealer view and show with an <strong>Allocations</strong>
-  count (amber when unmapped) on the Mapping page.
+  banner and show with an <strong>Allocations</strong> count (amber when unmapped) on
+  the Mapping page. The "<em>N order(s)/allocation(s) couldn't be matched</em>" banners
+  appear on the admin <strong>Forecast</strong> view only — they're hidden from the
+  dealer-facing view (and from the admin <strong>Dealer view</strong> preview) so
+  dealers never see internal mapping gaps.
 </p>
 <p>
   <strong>Auto-suggest</strong>: on every import, the dashboard scans unmapped

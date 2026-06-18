@@ -130,7 +130,7 @@ def admin_required(f):
 
 # ----- login / logout -------------------------------------------------
 
-@app.route("/", methods=["GET"])
+@app.route("/login", methods=["GET"])
 def login():
     return render_template("login.html")
 
@@ -160,7 +160,7 @@ def login_post():
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for("home"))
 
 
 # ----- feedback widget ------------------------------------------------
@@ -216,6 +216,18 @@ def _dealer_months_visible():
     except (TypeError, ValueError):
         n = 12
     return max(1, min(12, n))
+
+
+# Synthetic "general dealer": no dealer_code, so no per-dealer orders are shown —
+# just the country-wide availability grid that every dealer sees.
+GENERAL_DEALER = {"name": "Bike availability", "country": "UK", "dealer_code": None}
+
+
+@app.route("/", methods=["GET"])
+def home():
+    """Public landing — the general dealer availability view, no login required.
+    Logged-in dealers get their own view (with committed orders) at /dealer."""
+    return _render_dealer(dict(GENERAL_DEALER), is_admin_view=False)
 
 
 @app.route("/dealer")
