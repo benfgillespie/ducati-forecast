@@ -150,69 +150,157 @@ def parse_period_text(text):
 def parse_allocations(path):
     """Parse one or more allocation snapshots from a workbook.
 
-    Returns a list of (sheet_name, sheet_report_date_or_None, rows) tuples.
-    One tuple per non-empty sheet. Empty placeholder sheets are skipped.
+    Returns (sheets, warnings):
+      * sheets   — list of (sheet_name, report_date_or_None, rows) for every
+                   sheet that yielded at least one row. For a single daily file
+                   report_date is None (caller derives it); for a master
+                   workbook it's parsed from the sheet name ('DD.MM.YY am|pm').
+      * warnings — human-readable strings describing any sheet whose layout
+                   differed from the standard export, so the caller can surface
+                   them instead of silently dropping rows.
 
-    - For a single-sheet daily file (one sheet typically named 'Sheet1'),
-      returns a list of length 1 with sheet_report_date=None; the caller
-      derives the report date from the filename or the admin override.
-    - For a master workbook with sheets named per period
-      ('DD.MM.YY am|pm'), each sheet's report_date is pre-parsed from
-      its name.
-
-    Each sheet's row layout is auto-detected by finding 'Order Number'
-    in the header, so both the Export layout and the master file's
-    leading-row-ID layout work without a flag."""
+    Sheets in the master workbook are NOT all the same shape — columns get
+    reordered, some have no header row, and some omit the 'Material' column
+    entirely. Each sheet is parsed defensively (see _parse_allocations_sheet);
+    anything lost or recovered-by-fallback is reported in `warnings`."""
     wb = load_workbook(path, data_only=True, read_only=True)
     out = []
+    warnings = []
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        rows = _parse_allocations_sheet(ws)
+        rows, diag = _parse_allocations_sheet(ws)
+        # Loud diagnostics — only for sheets where something was off.
+        if not diag["material_col"] and diag["skipped_no_material"]:
+            warnings.append(
+                f"'{sheet_name}': no 'Material' column — "
+                f"{diag['skipped_no_material']} row(s) couldn't be mapped and were skipped."
+            )
+        elif diag["skipped_no_material"]:
+            warnings.append(
+                f"'{sheet_name}': {diag['skipped_no_material']} row(s) had no Material value and were skipped."
+            )
+        if rows and not diag["header"]:
+            warnings.append(
+                f"'{sheet_name}': no header row — read by column position ({len(rows)} rows recovered)."
+            )
         if not rows:
             continue
         out.append((sheet_name, parse_period_text(sheet_name), rows))
     wb.close()
-    return out
+    return out, warnings
+
+
+# A Material *description* looks like "HYMV2SP 26 EUR SP G-WT STD DMH" or
+# "MS896ST 26 EUR MV G-..." — a code token, then a 2-digit model year, then the
+# rest. Distinct from a Material *code* ("D50001526"), an order number, a PO
+# number, a date, or a bike-model name. Used to locate the Material column on
+# sheets that have no usable header.
+_MATERIAL_DESC_RE = re.compile(r"^[A-Za-z0-9+]{2,}\s+2[0-9]\b")
+
+
+def _norm_country(v):
+    return COUNTRY_FROM_ORDER.get(str(v).strip().upper() if v else "", v)
 
 
 def _parse_allocations_sheet(ws):
-    """Parse one sheet's worth of allocation rows. Returns list of dicts.
-    Empty list if the sheet has no header or no data."""
+    """Parse one sheet of allocation rows. Returns (rows, diag).
+
+    The master workbook's sheets aren't a fixed format, so we don't assume a
+    rigid column order:
+      * if a header row exists (a cell reading 'Order Number'), columns are
+        mapped by NAME — robust to reordering and to missing columns;
+      * if not, we fall back to the standard export's positional layout,
+        anchored on the Material-description column detected by content.
+    A row with no Material value can't be mapped to a plan model, so it's
+    skipped and counted in diag rather than guessed at.
+
+    diag = {header, material_col, rows, skipped_no_material} lets the caller
+    warn loudly about non-standard sheets."""
+    grid = [list(r) for r in ws.iter_rows(values_only=True)]
+    diag = {"header": False, "material_col": False, "rows": 0, "skipped_no_material": 0}
+
+    # Locate a header row: the first row containing an exact 'order number' cell.
+    header_idx = None
+    for i, row in enumerate(grid):
+        if any(c is not None and str(c).strip().lower() == "order number" for c in row):
+            header_idx = i
+            break
+
+    col = {}  # field -> column index
+    if header_idx is not None:
+        diag["header"] = True
+        hdr = {}
+        for j, c in enumerate(grid[header_idx]):
+            if c is not None and str(c).strip():
+                hdr.setdefault(str(c).strip().lower(), j)
+
+        def find(*names):
+            for n in names:
+                if n in hdr:
+                    return hdr[n]
+            return None
+
+        col = {
+            "order_number": find("order number"),
+            "material": find("material"),          # 'material code' won't match 'material'
+            "bike_super_model": find("bike super model"),
+            "bike_model": find("bike model"),
+            "country": find("country", "sales country", "market"),
+            "dealer_code": find("dealer code", "sold-to party"),
+        }
+        data = grid[header_idx + 1:]
+    else:
+        # Headerless: find the Material-description column by content, then read
+        # neighbours using the standard layout's offsets from Material
+        # (order=-2, super=+1, model=+2, country=+10, dealer_code=+12).
+        data = [r for r in grid if any(c is not None and str(c).strip() for c in r)]
+        counts = {}
+        for r in data:
+            for j, c in enumerate(r):
+                if c is not None and _MATERIAL_DESC_RE.match(str(c).strip()):
+                    counts[j] = counts.get(j, 0) + 1
+        if counts:
+            m = max(counts, key=lambda k: counts[k])
+            col = {
+                "order_number": m - 2 if m - 2 >= 0 else None,
+                "material": m,
+                "bike_super_model": m + 1,
+                "bike_model": m + 2,
+                "country": m + 10,
+                "dealer_code": m + 12,
+            }
+
+    diag["material_col"] = col.get("material") is not None
+
+    def cell(row, key):
+        j = col.get(key)
+        if j is None or j >= len(row):
+            return None
+        return row[j]
+
     out = []
-    header_offset = None
-    for row in ws.iter_rows(values_only=True):
-        if header_offset is None:
-            for i, v in enumerate(row):
-                if v and str(v).strip().lower() == "order number":
-                    header_offset = i
-                    break
-            if header_offset is None:
-                continue
+    for row in data:
+        if not any(c is not None and str(c).strip() for c in row):
             continue
-        if not any(row):
+        material = cell(row, "material")
+        order_raw = cell(row, "order_number")
+        if not material and not order_raw:
+            continue  # blank / spacer row
+        if not material:
+            diag["skipped_no_material"] += 1
             continue
-        payload = (row[header_offset:] + (None,) * 18)[:18]
-        (order_number, _mat_code, material, super_model, bike_model,
-         _bike_color, _bike_type, _ec_status, _ec_date, _request_date,
-         _po_number, _status_group, country_raw, _dealer, dealer_code,
-         _customer, _order_create_date, _confirmed_delivery_date) = payload
-
-        if not material and not order_number:
-            continue
-
+        dealer_code = cell(row, "dealer_code")
         out.append({
-            "order_number": str(order_number) if order_number else None,
+            "order_number": str(order_raw) if order_raw else None,
             "material_prefix": extract_material_prefix(material),
-            "material_full": str(material) if material else None,
-            "bike_super_model": super_model,
-            "bike_model": bike_model,
-            "country": COUNTRY_FROM_ORDER.get(
-                str(country_raw).strip().upper() if country_raw else "",
-                country_raw,
-            ),
+            "material_full": str(material),
+            "bike_super_model": cell(row, "bike_super_model"),
+            "bike_model": cell(row, "bike_model"),
+            "country": _norm_country(cell(row, "country")),
             "dealer_code": str(dealer_code) if dealer_code else None,
         })
-    return out
+        diag["rows"] += 1
+    return out, diag
 
 
 def parse_orders(path):

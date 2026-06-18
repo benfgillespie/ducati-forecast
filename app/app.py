@@ -994,7 +994,7 @@ def api_allocations_ingest():
                 or "").strip()
 
     try:
-        sheets = parsers.parse_allocations(io.BytesIO(upload.stream.read()))
+        sheets, alloc_warnings = parsers.parse_allocations(io.BytesIO(upload.stream.read()))
     except Exception as e:
         return jsonify({
             "status": "parse_failed",
@@ -1055,6 +1055,7 @@ def api_allocations_ingest():
         "added": total_added,
         "skipped": total_skipped,
         "sheets": sheet_summaries,
+        "warnings": alloc_warnings,
         "report_date": resolved[-1][1],
         "filename": upload.filename,
     })
@@ -1117,14 +1118,15 @@ def admin_upload():
     plan_rows = None
     order_rows = None
     allocation_sheets = None
+    alloc_warnings = []
     try:
         if plan_file is not None:
             plan_rows = parsers.parse_plan(io.BytesIO(plan_file.stream.read()))
         if orders_file is not None:
             order_rows = parsers.parse_orders(io.BytesIO(orders_file.stream.read()))
         if allocations_file is not None:
-            # List of (sheet_name, sheet_report_date_or_None, rows).
-            allocation_sheets = parsers.parse_allocations(
+            # (sheets, warnings); sheets are (sheet_name, report_date_or_None, rows).
+            allocation_sheets, alloc_warnings = parsers.parse_allocations(
                 io.BytesIO(allocations_file.stream.read())
             )
     except Exception as e:
@@ -1334,6 +1336,10 @@ def admin_upload():
     if proposed_n:
         msg += f" {proposed_n} mapping suggestion(s) ready for review."
     flash(msg, "ok")
+    # Surface any non-standard-sheet warnings from the allocations parse so the
+    # admin sees dropped/recovered rows instead of a silently-wrong total.
+    for w in alloc_warnings:
+        flash(f"Allocations sheet note — {w}", "error")
     return redirect(url_for("admin_home"))
 
 
