@@ -1085,6 +1085,9 @@ def admin_upload():
                         if allocations_action == "new" else None)
     # Allocations report date — derived from filename, with admin override field.
     allocations_date_override = (request.form.get("allocations_date") or "").strip()
+    # "Replace all" — clear the allocations table before ingesting this file, for a
+    # clean rebuild without a plan re-upload. Only meaningful when uploading a file.
+    allocations_replace = bool(request.form.get("allocations_replace")) and allocations_file is not None
 
     last_alloc = _latest_allocations_report()
 
@@ -1249,7 +1252,15 @@ def admin_upload():
     # the next accounting period fresh.
     allocations_added = 0
     allocations_skipped = 0
+    allocations_replaced = 0
     if resolved_sheets and allocations_file is not None:
+        if allocations_replace:
+            # Clean rebuild: drop everything before loading this file from scratch.
+            allocations_replaced = con.execute(
+                "SELECT COUNT(*) AS c FROM allocations"
+            ).fetchone()["c"]
+            con.execute("DELETE FROM allocations")
+            con.execute("DELETE FROM allocation_reports")
         for sheet_name, effective_date, rows in resolved_sheets:
             # Label the audit-log filename with the sheet name when we're
             # ingesting more than one (so a master upload doesn't look like
@@ -1331,6 +1342,9 @@ def admin_upload():
     if plan_wiped_allocations:
         msg += (f" Allocations table wiped ({plan_wiped_allocations} row(s) "
                 f"cleared) because a new plan was uploaded.")
+    if allocations_replaced:
+        msg += (f" Replaced all allocations ({allocations_replaced} row(s) "
+                f"cleared first, then reloaded from this file).")
     if new_prefixes:
         msg += f" {len(new_prefixes)} new Material prefix(es) detected."
     if proposed_n:

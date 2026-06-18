@@ -93,6 +93,13 @@
                  placeholder="YYYY-MM-DD AM/PM (leave blank to use filename)"
                  class="block w-full mt-1 border border-slate-300 rounded px-2 py-1 text-sm">
         </label>
+        <label class="flex items-start gap-2 mt-3 text-sm">
+          <input type="checkbox" name="allocations_replace" value="1" class="mt-1">
+          <span>
+            <span class="font-medium text-rose-700">Replace all existing allocations</span>
+            <span class="block text-xs text-slate-500">Clears the current allocations table first, then loads this file from scratch — use this for a clean rebuild (e.g. after a parser fix, or to drop stale data) without re-uploading the plan. Leave unticked to add to what's already there (the normal twice-a-day behaviour).</span>
+          </span>
+        </label>
       </div>
       <label class="flex items-start gap-2 text-sm {% if not last_allocations %}opacity-50{% endif %}">
         <input type="radio" name="allocations_action" value="reuse" class="mt-1"

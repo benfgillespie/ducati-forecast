@@ -54,6 +54,7 @@
       <li><strong>Single-period file</strong> — filename pattern <code>Allocations DD.MM.YY am|pm.xlsx</code>. The date is read from the filename.</li>
       <li><strong>Master workbook</strong> — one sheet per period, sheet names like <code>22.05.26 pm</code>. The system walks every dated sheet chronologically and ingests each as its own report. Re-uploading a master is safe: dedup-by-order-number keeps the data clean.</li>
     </ul>
+    <p class="mt-1"><strong>Replace all existing allocations</strong> — a tick-box on the allocations upload. Leave it <em>off</em> for the normal append behaviour. Tick it to <em>clear the allocations table first</em> and rebuild purely from this file — handy for a clean reset (e.g. dropping stale data) without re-uploading the plan.</p>
   </li>
 </ul>
 
