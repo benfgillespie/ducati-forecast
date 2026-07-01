@@ -8,6 +8,15 @@
     Numbers are estimates and may shift week-to-week.
     {% if last_import %}Data refreshed {{ last_import }}.{% endif %}
   </p>
+  {% if is_admin_view and accounting_month %}
+    <p class="text-xs text-slate-500 mt-1">
+      Accounting month: <span class="font-medium">{{ accounting_month.label }}</span>
+      <span class="text-slate-400">
+        {%- if accounting_month.source == 'manual' %} (pinned manually){% elif accounting_month.source == 'auto' %} (auto-detected from the allocation dates){% else %} (no allocations loaded — defaulted to this calendar month){% endif -%}
+      </span>
+      — <a href="{{ url_for('admin_upload') }}" class="text-blue-600 hover:underline">change</a>
+    </p>
+  {% endif %}
   {% if unmapped_orders and is_admin_view %}
     <p class="text-xs text-amber-700 mt-1">
       Note: {{ unmapped_orders }} order(s) couldn't be matched to a plan model and are excluded from the figures.

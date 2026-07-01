@@ -121,4 +121,33 @@
     <button class="bg-slate-800 text-white rounded px-4 py-2 hover:bg-slate-700">Parse &amp; publish</button>
   </form>
 </div>
+
+<div class="bg-white border border-slate-200 rounded p-6 max-w-xl mt-6">
+  <h2 class="text-sm font-medium mb-2">Accounting month</h2>
+  <p class="text-xs text-slate-500 mb-3">
+    The 12-month availability window starts from this month, and allocations are
+    consumed from the forecast starting here. It follows the dates in the
+    allocation file automatically — so an allocation master for June keeps the
+    figures on June even after the calendar rolls into July. Pin it manually only
+    to force a different month.
+  </p>
+  <p class="text-sm mb-3">
+    Currently: <span class="font-medium">{{ accounting_month.label }}</span>
+    <span class="text-xs text-slate-400">
+      {%- if accounting_month.source == 'manual' %} (pinned manually — auto-detect would use {{ accounting_month.auto_label }}){% elif accounting_month.source == 'auto' %} (auto-detected from the allocation dates){% else %} (no allocations loaded — defaulted to this calendar month){% endif -%}
+    </span>
+  </p>
+  <form method="post" action="{{ url_for('admin_set_accounting_month') }}" class="flex items-end gap-3">
+    <label class="text-xs text-slate-500">
+      Pin to month
+      <input type="month" name="accounting_month" value="{{ accounting_month.value }}"
+             class="block mt-1 border border-slate-300 rounded px-2 py-1 text-sm">
+    </label>
+    <button class="bg-slate-800 text-white rounded px-3 py-1.5 text-sm hover:bg-slate-700">Pin</button>
+    {% if accounting_month.source == 'manual' %}
+      <button name="reset" value="1" class="text-sm text-slate-600 hover:underline px-2 py-1.5">Reset to auto</button>
+    {% endif %}
+  </form>
+  <p class="text-xs text-slate-400 mt-2">A manual pin is cleared automatically when you upload a new plan (new accounting period).</p>
+</div>
 {% endblock %}

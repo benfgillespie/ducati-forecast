@@ -218,6 +218,65 @@ def _dealer_months_visible():
     return max(1, min(12, n))
 
 
+def _auto_accounting_month():
+    """(date-on-the-1st, source) inferred from the loaded allocations.
+
+    The allocation file's sheets/filename are dated (e.g. '12.06.26'), and those
+    dates are stored on each allocation_reports row. The month those bikes were
+    allocated in IS the accounting month — we don't have to guess it from the
+    wall clock. Weighted by row_count so a stray off-month sheet can't outvote
+    the real period; ties break to the earliest month. Falls back to today's
+    month (source 'default') when no allocations are loaded."""
+    weights = {}
+    for r in db.get_conn().execute(
+        "SELECT report_date, row_count FROM allocation_reports "
+        "WHERE report_date IS NOT NULL AND report_date <> ''"
+    ).fetchall():
+        ym = str(r["report_date"])[:7]           # 'YYYY-MM' from 'YYYY-MM-DD am|pm'
+        if len(ym) == 7 and ym[4] == "-":
+            weights[ym] = weights.get(ym, 0) + (r["row_count"] or 0) + 1
+    if weights:
+        top = max(weights.values())
+        best = min(k for k, v in weights.items() if v == top)  # most bikes; ties → earliest
+        try:
+            y, m = best.split("-")
+            return date(int(y), int(m), 1), "auto"
+        except ValueError:
+            pass
+    return date.today().replace(day=1), "default"
+
+
+def _accounting_anchor():
+    """(date-on-the-1st, source) the 12-month availability window starts from.
+
+    This is the *accounting month* — the month the loaded figures belong to —
+    NOT simply today's calendar month. The whole grid (which plan months load,
+    the column headers, and the front of the queue that allocations are poured
+    into) hangs off this. Anchoring on the wall clock shifts availability by a
+    month the instant the calendar rolls over while the data still reflects the
+    prior period. Resolution: an explicit admin override ('manual') wins; else
+    auto-detect from the allocation dates ('auto' / 'default')."""
+    override = (db.get_setting("accounting_month") or "").strip()
+    m = re.match(r"^(\d{4})-(\d{1,2})$", override)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return date(int(m.group(1)), int(m.group(2)), 1), "manual"
+    return _auto_accounting_month()
+
+
+def _accounting_month_state():
+    """Display bundle for the admin UI: current anchor, its source, the value
+    for the <input type=month>, and what auto-detect alone would pick (so the
+    admin can see what a manual pin is overriding)."""
+    anchor, source = _accounting_anchor()
+    auto_date, _ = _auto_accounting_month()
+    return {
+        "value": f"{anchor.year:04d}-{anchor.month:02d}",
+        "label": f"{MONTH_NAMES[anchor.month - 1]} {anchor.year}",
+        "source": source,
+        "auto_label": f"{MONTH_NAMES[auto_date.month - 1]} {auto_date.year}",
+    }
+
+
 # Synthetic "general dealer": no dealer_code, so no per-dealer orders are shown —
 # just the country-wide availability grid that every dealer sees.
 GENERAL_DEALER = {"name": "Bike availability", "country": "UK", "dealer_code": None}
@@ -255,7 +314,8 @@ def admin_dealer_view():
 def _render_dealer(dealer, is_admin_view=False):
     con = db.get_conn()
 
-    months = _rolling_months(n=12)
+    anchor_date, anchor_source = _accounting_anchor()
+    months = _rolling_months(start=anchor_date, n=12)
     months_keys = [(y, m) for (y, m) in months]
     # Dealers see only the first N months; admin preview always sees all 12.
     visible_n = 12 if is_admin_view else _dealer_months_visible()
@@ -488,6 +548,10 @@ def _render_dealer(dealer, is_admin_view=False):
         visible_months=visible_months,
         is_admin_view=is_admin_view,
         month_names=MONTH_NAMES,
+        accounting_month={
+            "label": f"{MONTH_NAMES[anchor_date.month - 1]} {anchor_date.year}",
+            "source": anchor_source,
+        },
         own_orders=own_orders,
         last_import=last_import["imported_at"] if last_import else None,
         unmapped_orders=unmapped_orders,
@@ -1084,6 +1148,7 @@ def admin_upload():
             last_plan=_latest_plan_import(),
             last_orders=_latest_orders_import(),
             last_allocations=_latest_allocations_report(),
+            accounting_month=_accounting_month_state(),
         )
 
     # Per-file action: "new" = upload a fresh file, "reuse" = keep what's in the DB.
@@ -1206,6 +1271,10 @@ def admin_upload():
         ).fetchone()["c"]
         con.execute("DELETE FROM allocations")
         con.execute("DELETE FROM allocation_reports")
+        # New accounting period — drop any manual accounting-month pin so it
+        # can't leak the old month into the new plan's window. (Same connection,
+        # no commit here — the whole upload commits together at the end.)
+        con.execute("DELETE FROM settings WHERE key='accounting_month'")
         con.execute("DELETE FROM plan")
         con.executemany(
             "INSERT INTO plan(country, plan_super, plan_model, year, month, qty) "
@@ -1771,6 +1840,28 @@ def admin_set_months_visible():
     db.set_setting("dealer_months_visible", str(n))
     flash(f"Dealers now see the next {n} month{'s' if n != 1 else ''}.", "ok")
     return redirect(url_for("admin_dealers"))
+
+
+@app.route("/admin/accounting-month", methods=["POST"])
+@admin_required
+def admin_set_accounting_month():
+    """Pin the accounting month manually, or reset to auto-detect. The window
+    normally follows the allocation file's own dates; this is the override."""
+    if request.form.get("reset"):
+        db.set_setting("accounting_month", "")
+        flash("Accounting month reset to auto-detect.", "ok")
+        return redirect(url_for("admin_upload"))
+    val = (request.form.get("accounting_month") or "").strip()
+    m = re.match(r"^(\d{4})-(\d{1,2})$", val)
+    if not m or not 1 <= int(m.group(2)) <= 12:
+        flash("Pick a valid month.", "error")
+        return redirect(url_for("admin_upload"))
+    normalized = f"{int(m.group(1)):04d}-{int(m.group(2)):02d}"
+    db.set_setting("accounting_month", normalized)
+    flash(f"Accounting month pinned to "
+          f"{MONTH_NAMES[int(m.group(2)) - 1]} {m.group(1)}. "
+          f"It stays pinned until you reset it or upload a new plan.", "ok")
+    return redirect(url_for("admin_upload"))
 
 
 # ----- admin: feedback inbox ------------------------------------------
