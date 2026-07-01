@@ -62,6 +62,7 @@
     </ul>
     <p class="mt-1"><strong>Replace all existing allocations</strong> — a tick-box on the allocations upload. Leave it <em>off</em> for the normal append behaviour. Tick it to <em>clear the allocations table first</em> and rebuild purely from this file — handy for a clean reset (e.g. dropping stale data) without re-uploading the plan.</p>
   </li>
+  <li><strong>Accounting month</strong> — the box below the upload form. This is the month allocations are counted against; it's auto-detected from the allocation file's dates and normally needs no attention. Pin it manually only to force a different month (it's cleared again on the next plan upload). See <em>Availability math → Accounting month vs displayed months</em> below.</li>
 </ul>
 
 <h3>Availability math <span class="status-badge status-live">Live</span></h3>
@@ -225,9 +226,9 @@
 <!-- ============================================================ -->
 <h2>Weekly / daily routine</h2>
 <ol>
-  <li><strong>Twice a day</strong>: allocations file uploaded (manually for now, automated soon via CloudMailin).</li>
+  <li><strong>Twice a day</strong>: allocations file uploaded (manually for now, automated soon via CloudMailin). The accounting month follows the file's dates automatically — no need to set it.</li>
   <li><strong>Weekly</strong>: latest orders export to <em>Admin → Upload</em>. Reuse the plan and allocations.</li>
-  <li><strong>Monthly</strong>: new plan workbook. This wipes allocations to start the period fresh.</li>
+  <li><strong>Monthly</strong>: new plan workbook. This wipes allocations to start the period fresh and clears any manual accounting-month pin — the next allocations upload sets the new month.</li>
   <li>After any upload: open the admin home and resolve any notifications. If new material prefixes appeared, head to <em>Mapping</em> and accept/reject the auto-suggestions.</li>
   <li>Spot-check via <strong>Dealer view</strong> before the next dealer logs in.</li>
 </ol>

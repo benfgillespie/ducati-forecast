@@ -76,6 +76,15 @@ endpoint:
 Response is JSON; CloudMailin shows it in their webhook log so you can
 audit each delivery.
 
+The report date recorded here also drives the dashboard's **accounting
+month** — the month each allocation is counted against, and the point the
+availability maths consume forecast from. It's auto-detected from the
+dates on the loaded allocations, so no extra field is needed: a June
+allocations email keeps the figures matched to June even after the
+calendar rolls into July. (The displayed columns still start at the
+current calendar month.) An admin can override it from Admin → Upload →
+Accounting month if ever needed.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
