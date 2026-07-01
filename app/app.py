@@ -314,12 +314,24 @@ def admin_dealer_view():
 def _render_dealer(dealer, is_admin_view=False):
     con = db.get_conn()
 
+    # Two distinct windows:
+    #   * the ACCOUNTING window drives the math and starts at the accounting
+    #     month, so allocations bind to the month they were actually made in
+    #     (a June master's bikes consume June's forecast even once it's July);
+    #   * the DISPLAY window is the columns we show, starting at the current
+    #     calendar month — we don't show a past month of the period as if it
+    #     were future availability. Any leftover forecast from the hidden
+    #     lead months still rolls forward into the first displayed month.
     anchor_date, anchor_source = _accounting_anchor()
-    months = _rolling_months(start=anchor_date, n=12)
-    months_keys = [(y, m) for (y, m) in months]
-    # Dealers see only the first N months; admin preview always sees all 12.
+    display_start = max(anchor_date, date.today().replace(day=1))
+    lead = ((display_start.year - anchor_date.year) * 12
+            + (display_start.month - anchor_date.month))   # hidden past months (>=0)
+    months_keys = _rolling_months(start=anchor_date, n=lead + 12)  # full accounting window
+    display_keys = months_keys[lead:]                              # the 12 months we display
+    display_set = set(display_keys)
+    # Dealers see only the first N of the displayed months; admin sees all 12.
     visible_n = 12 if is_admin_view else _dealer_months_visible()
-    visible_months = months[:visible_n]
+    visible_months = display_keys[:visible_n]
 
     # DUK-wide forecast: read the DUK_26 / DUK_27 rollup sheets directly (Ross sometimes
     # adjusts these manually so they don't equal the UK + SWE + NOR sum).
@@ -464,11 +476,13 @@ def _render_dealer(dealer, is_admin_view=False):
             monthly[months_keys[-1]]["allocated"] += remaining
 
     # Then: allocate open orders FIFO into the first month with remaining
-    # capacity AFTER allocations. Overflow piles onto the last month.
+    # capacity AFTER allocations. Open orders are future deliveries, so they
+    # only fill DISPLAYED (current/future) months — never a past accounting
+    # month. Overflow piles onto the last displayed month.
     for p_model, monthly in grid.items():
         for _ in queue_for.get(p_model, []):
             placed = False
-            for ym in months_keys:
+            for ym in display_keys:
                 free = (monthly[ym]["forecast"]
                         - monthly[ym]["allocated"]
                         - monthly[ym]["committed"])
@@ -477,7 +491,7 @@ def _render_dealer(dealer, is_admin_view=False):
                     placed = True
                     break
             if not placed:
-                monthly[months_keys[-1]]["committed"] += 1
+                monthly[display_keys[-1]]["committed"] += 1
 
     rows = []
     for p_model, monthly in sorted(grid.items(), key=lambda x: (super_for.get(x[0]) or "", x[0])):
@@ -494,24 +508,31 @@ def _render_dealer(dealer, is_admin_view=False):
         # committed). Because orders fill earliest-month-first and any overflow lands
         # on the last month, interior months never go negative, so this running total
         # only dips below zero when the model is genuinely overcommitted overall.
+        # Accumulate the running total across the WHOLE accounting window so the
+        # first displayed month inherits any leftover forecast carried over from
+        # the hidden lead months — but only emit cells for displayed months.
+        # Totals are over the full window too, so 'Allocated' matches the
+        # all-allocations breakdown and Available = forecast − allocated −
+        # committed stays consistent (a fully-consumed lead month nets to 0).
         cumulative = 0
         for ym in months_keys:
             d = monthly.get(ym, {"forecast": 0, "allocated": 0, "committed": 0})
             available = d["forecast"] - d["allocated"] - d["committed"]
             cumulative += available
-            cells.append({
-                "year": ym[0], "month": ym[1],
-                "forecast": d["forecast"],
-                "allocated": d["allocated"],
-                "committed": d["committed"],
-                "available": available,
-                "cumulative": cumulative,
-            })
             forecast_total += d["forecast"]
             allocated_total += d["allocated"]
             committed_total += d["committed"]
-            if soonest is None and cumulative >= 1:
-                soonest = ym
+            if ym in display_set:
+                cells.append({
+                    "year": ym[0], "month": ym[1],
+                    "forecast": d["forecast"],
+                    "allocated": d["allocated"],
+                    "committed": d["committed"],
+                    "available": available,
+                    "cumulative": cumulative,
+                })
+                if soonest is None and cumulative >= 1:
+                    soonest = ym
         story = {
             "prefixes": prefixes_per_model.get(p_model, []),
             "forecast_total": forecast_total,
@@ -544,7 +565,7 @@ def _render_dealer(dealer, is_admin_view=False):
         "dealer.html",
         dealer=dealer,
         rows=rows,
-        months=months,
+        months=display_keys,
         visible_months=visible_months,
         is_admin_view=is_admin_view,
         month_names=MONTH_NAMES,

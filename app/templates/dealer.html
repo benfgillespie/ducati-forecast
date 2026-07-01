@@ -10,10 +10,11 @@
   </p>
   {% if is_admin_view and accounting_month %}
     <p class="text-xs text-slate-500 mt-1">
-      Accounting month: <span class="font-medium">{{ accounting_month.label }}</span>
+      Allocations counted against: <span class="font-medium">{{ accounting_month.label }}</span>
       <span class="text-slate-400">
         {%- if accounting_month.source == 'manual' %} (pinned manually){% elif accounting_month.source == 'auto' %} (auto-detected from the allocation dates){% else %} (no allocations loaded — defaulted to this calendar month){% endif -%}
-      </span>
+      </span>.
+      Columns show from the current month onward.
       — <a href="{{ url_for('admin_upload') }}" class="text-blue-600 hover:underline">change</a>
     </p>
   {% endif %}
@@ -95,7 +96,7 @@
               {% endif %}
             </div>
             <div class="bg-white border border-slate-200 rounded p-3">
-              <div class="text-xs uppercase text-slate-500 tracking-wide mb-1">12-month totals</div>
+              <div class="text-xs uppercase text-slate-500 tracking-wide mb-1" title="Across the accounting window (from the accounting month), so Allocated matches the all-allocations breakdown">Period totals</div>
               <div class="text-xs leading-relaxed">
                 Forecast: <span class="font-medium text-slate-700">{{ r.story.forecast_total }}</span><br>
                 − Allocated: <span class="font-medium text-slate-700">{{ r.story.allocated_total }}</span><br>

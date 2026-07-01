@@ -65,25 +65,35 @@
 </ul>
 
 <h3>Availability math <span class="status-badge status-live">Live</span></h3>
-<h4>Accounting month (which months the grid starts from)</h4>
+<h4>Accounting month vs displayed months</h4>
 <p>
-  The 12-month window doesn't blindly start at today's calendar month — it starts
-  at the <strong>accounting month</strong>, the month the loaded figures belong to.
-  This matters because allocations are consumed from the forecast <em>starting at
-  the first column</em>: if the window jumped forward the moment the calendar
-  ticked over (say into July) while the data still reflected June, June's
-  allocations would be pushed onto July's forecast and every model would read a
-  month late.
+  The maths use two windows. Allocations are consumed from the forecast starting
+  at the <strong>accounting month</strong> — the month the loaded bikes were
+  actually allocated in — so they bind to the right month. The
+  <strong>columns you see</strong> start at the <em>current calendar month</em>:
+  a past month of the period isn't shown as a column, but its leftover forecast
+  (forecast not consumed by allocations) rolls forward into the first visible
+  column. Example: a June allocation master with 62 bikes and a June forecast of
+  47 → 47 are matched to June and the other 15 spill into July; the grid still
+  starts its columns at July.
+</p>
+<p>
+  Why this matters: if allocations were consumed from today's month instead of
+  their real month, the instant the calendar ticked into July (while the data
+  still reflected June) June's bikes would land on July's forecast and every
+  model would read a month late.
 </p>
 <p>
   The accounting month is <strong>auto-detected from the allocation file's own
   dates</strong> (the sheet/filename dates like <code>12.06.26</code>). So a June
-  allocation master keeps the figures anchored on June until you roll the period
-  forward — which happens automatically when you upload July's allocations, or the
-  moment you upload a new plan (which wipes allocations to start fresh). The
-  current accounting month is shown at the top of the <strong>Forecast</strong>
-  view. To force a different month, use <em>Admin → Upload → Accounting month</em>
-  to pin it; a manual pin is cleared automatically on the next plan upload.
+  allocation master stays matched to June until you roll the period forward —
+  which happens automatically when you upload July's allocations, or the moment
+  you upload a new plan (which wipes allocations to start fresh). It's shown at
+  the top of the <strong>Forecast</strong> view ("Allocations counted against…").
+  To force a different month, use <em>Admin → Upload → Accounting month</em> to
+  pin it; a manual pin is cleared automatically on the next plan upload. The
+  per-model <strong>Period totals</strong> are summed across the accounting
+  window (so <em>Allocated</em> there matches the all-allocations breakdown).
 </p>
 <p>For each (model, month) cell, start from the raw monthly position:</p>
 <pre>raw[month] = forecast[month]

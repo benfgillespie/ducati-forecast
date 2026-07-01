@@ -125,11 +125,13 @@
 <div class="bg-white border border-slate-200 rounded p-6 max-w-xl mt-6">
   <h2 class="text-sm font-medium mb-2">Accounting month</h2>
   <p class="text-xs text-slate-500 mb-3">
-    The 12-month availability window starts from this month, and allocations are
-    consumed from the forecast starting here. It follows the dates in the
-    allocation file automatically — so an allocation master for June keeps the
-    figures on June even after the calendar rolls into July. Pin it manually only
-    to force a different month.
+    The month allocations are counted against — bikes are consumed from the
+    forecast starting here. It follows the dates in the allocation file
+    automatically, so a June allocation master keeps its bikes matched to June
+    even after the calendar rolls into July. (The availability columns still
+    start at the current calendar month; a past accounting month just isn't shown
+    as a column — its leftover forecast rolls forward into the first column.) Pin
+    it manually only to force a different month.
   </p>
   <p class="text-sm mb-3">
     Currently: <span class="font-medium">{{ accounting_month.label }}</span>
