@@ -69,7 +69,11 @@
         {% for cell in r.visible_cells %}
           {% set v = cell.cumulative %}
           <td class="px-2 py-2 text-center align-middle"
-              title="Available incl. earlier-month roll-over: {{ v }}&#10;(this month: forecast {{ cell.forecast }} − allocated {{ cell.allocated }} − committed {{ cell.committed }} = {{ cell.available }})">
+              {% if is_admin_view %}
+              title="Available incl. earlier-month roll-over: {{ v }}&#10;(this month: forecast {{ cell.forecast }} − allocated {{ cell.allocated }} − committed {{ cell.committed }} = {{ cell.available }})"
+              {% else %}
+              title="{% if v >= 10 %}Good availability{% elif v >= 1 %}Limited{% else %}Full{% endif %}"
+              {% endif %}>
             <span class="inline-block w-3 h-3 rounded-full
                          {% if v >= 10 %}bg-emerald-500
                          {% elif v >= 1 %}bg-amber-400
