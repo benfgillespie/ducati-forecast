@@ -118,9 +118,102 @@
       </label>
     </fieldset>
 
-    <button class="bg-slate-800 text-white rounded px-4 py-2 hover:bg-slate-700">Parse &amp; publish</button>
+    <div id="upload-chunk-fields"></div>
+    <button id="upload-submit" class="bg-slate-800 text-white rounded px-4 py-2 hover:bg-slate-700 disabled:opacity-50">Parse &amp; publish</button>
+    <p id="upload-status" class="text-sm text-slate-600" role="status"></p>
   </form>
 </div>
+
+<script>
+(function () {
+  // Vercel rejects request bodies over 4.5 MB, so files go up in pieces smaller
+  // than that and the final form submit only references them.
+  const CHUNK_BYTES = 4 * 1024 * 1024;
+  const CHUNK_URL = {{ url_for('admin_upload_chunk')|tojson }};
+  const SIDES = [
+    { action: 'plan_action', field: 'plan_file', label: 'Plan workbook' },
+    { action: 'orders_action', field: 'orders_file', label: 'Orders export' },
+    { action: 'allocations_action', field: 'allocations_file', label: 'Allocations' },
+  ];
+  const form = document.getElementById('upload-form');
+  const fields = document.getElementById('upload-chunk-fields');
+  const button = document.getElementById('upload-submit');
+  const status = document.getElementById('upload-status');
+  const fileInputs = SIDES.map((s) => form.elements[s.field]);
+
+  function setStatus(text, isError) {
+    status.textContent = text;
+    status.classList.toggle('text-rose-700', !!isError);
+  }
+
+  function addField(name, value) {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.value = value;
+    fields.appendChild(input);
+  }
+
+  function reset() {
+    fileInputs.forEach((input) => { input.disabled = false; });
+    fields.replaceChildren();
+    button.disabled = false;
+  }
+
+  async function sendChunk(uploadId, index, blob) {
+    const body = new FormData();
+    body.append('upload_id', uploadId);
+    body.append('index', index);
+    body.append('chunk', blob, 'chunk');
+    const res = await fetch(CHUNK_URL, { method: 'POST', body });
+    // An expired login redirects to the HTML login page, which isn't JSON.
+    const data = await res.json().catch(() => null);
+    if (!data) throw new Error('Your session may have expired — log in again and retry.');
+    if (!data.ok) throw new Error(data.error);
+  }
+
+  async function sendFile(side, file) {
+    const uploadId = crypto.randomUUID().replace(/-/g, '');
+    const total = Math.max(1, Math.ceil(file.size / CHUNK_BYTES));
+    for (let i = 0; i < total; i++) {
+      setStatus(`Uploading ${side.label} — part ${i + 1} of ${total}…`);
+      await sendChunk(uploadId, i, file.slice(i * CHUNK_BYTES, (i + 1) * CHUNK_BYTES));
+    }
+    addField(`${side.field}_upload_id`, uploadId);
+    addField(`${side.field}_name`, file.name);
+    addField(`${side.field}_chunks`, total);
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const chosen = SIDES.filter((s) => form.elements[s.action].value === 'new');
+    const missing = chosen.find((s) => !form.elements[s.field].files.length);
+    if (missing) {
+      setStatus(`${missing.label}: choose a file, or select "Reuse last upload".`, true);
+      return;
+    }
+
+    button.disabled = true;
+    try {
+      for (const side of chosen) {
+        await sendFile(side, form.elements[side.field].files[0]);
+      }
+    } catch (err) {
+      reset();
+      setStatus(`Upload failed: ${err.message} Nothing was imported.`, true);
+      return;
+    }
+    setStatus('Parsing and publishing…');
+    // Keep the files out of the final request, including any left selected on a
+    // side that was switched to "Reuse".
+    fileInputs.forEach((input) => { input.disabled = true; });
+    form.submit();
+  });
+
+  // Coming back with the browser's Back button can restore the submitted state.
+  window.addEventListener('pageshow', () => { reset(); setStatus(''); });
+})();
+</script>
 
 <div class="bg-white border border-slate-200 rounded p-6 max-w-xl mt-6">
   <h2 class="text-sm font-medium mb-2">Accounting month</h2>

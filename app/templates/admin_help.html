@@ -20,7 +20,7 @@
 </style>
 
 <h1>Dashboard README</h1>
-<p class="updated">Maintained: 2026-06-18 — features and status below reflect the current build.</p>
+<p class="updated">Maintained: 2026-11-05 — features and status below reflect the current build.</p>
 
 <p>
   A small internal portal that shows dealers across the UK, Sweden and Norway when
@@ -50,7 +50,8 @@
 <p>
   <strong>Admin → Upload</strong> takes three xlsx files independently. Each has
   <em>Upload new</em> / <em>Reuse last upload</em> radios so you can refresh just one
-  side without re-uploading the others.
+  side without re-uploading the others. Large files are fine: the page sends them in
+  pieces and shows progress, and nothing is imported until every piece has arrived.
 </p>
 <ul>
   <li><strong>Plan workbook</strong> — typically refreshed monthly. Each upload <em>replaces</em> the plan and <em>wipes the allocations table</em> (a new plan = new accounting period).</li>

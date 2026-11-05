@@ -150,6 +150,13 @@ CREATE TABLE IF NOT EXISTS feedback (
     message TEXT NOT NULL,
     resolved INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS upload_chunks (
+    upload_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    data BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (upload_id, chunk_index)
+);
 """
 
 _POSTGRES_SCHEMA = """
@@ -259,6 +266,13 @@ CREATE TABLE IF NOT EXISTS feedback (
     page TEXT,
     message TEXT NOT NULL,
     resolved INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS upload_chunks (
+    upload_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    data BYTEA NOT NULL,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (upload_id, chunk_index)
 );
 """
 

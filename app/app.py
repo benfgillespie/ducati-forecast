@@ -3,6 +3,7 @@ import json
 import os
 import re
 import secrets
+import time
 from datetime import date
 from functools import wraps
 
@@ -1160,6 +1161,72 @@ def api_allocations_ingest():
 
 # ----- admin: upload --------------------------------------------------
 
+# Vercel rejects any request body over 4.5 MB before it reaches this app, so the
+# upload page sends files in pieces to /admin/upload/chunk. The pieces wait in the
+# database (functions share no disk) until the form is submitted.
+_UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_UPLOAD_CHUNK_TTL_SECONDS = 24 * 60 * 60
+
+
+class _AssembledUpload:
+    """The parts of a Werkzeug FileStorage that admin_upload uses."""
+
+    def __init__(self, filename, data):
+        self.filename = filename
+        self.stream = io.BytesIO(data)
+
+
+def _take_upload(field):
+    """Return the file for a form field: reassembled from stored chunks when the
+    upload page sent it in pieces, otherwise a normal multipart file. Stored chunks
+    are consumed, so a retry needs a fresh upload. Raises ValueError if any are
+    missing."""
+    upload_id = request.form.get(f"{field}_upload_id")
+    if not upload_id:
+        return request.files.get(field)
+
+    con = db.get_conn()
+    rows = con.execute(
+        "SELECT chunk_index, data FROM upload_chunks WHERE upload_id=? "
+        "ORDER BY chunk_index",
+        (upload_id,),
+    ).fetchall()
+    con.execute("DELETE FROM upload_chunks WHERE upload_id=?", (upload_id,))
+    con.commit()
+
+    filename = request.form.get(f"{field}_name") or ""
+    expected = request.form.get(f"{field}_chunks", type=int)
+    if expected is None or [r["chunk_index"] for r in rows] != list(range(expected)):
+        raise ValueError(f"{filename or field} didn't arrive complete")
+    return _AssembledUpload(filename, b"".join(bytes(r["data"]) for r in rows))
+
+
+@app.route("/admin/upload/chunk", methods=["POST"])
+@admin_required
+def admin_upload_chunk():
+    upload_id = request.form.get("upload_id") or ""
+    index = request.form.get("index", type=int)
+    chunk = request.files.get("chunk")
+    data = chunk.read() if chunk else b""
+    if not _UPLOAD_ID_RE.match(upload_id) or index is None or index < 0 or not data:
+        return jsonify(ok=False, error="Invalid or empty upload chunk."), 400
+
+    now = int(time.time())
+    con = db.get_conn()
+    # Clear anything left behind by uploads that were abandoned part-way.
+    con.execute("DELETE FROM upload_chunks WHERE created_at < ?",
+                (now - _UPLOAD_CHUNK_TTL_SECONDS,))
+    con.execute(
+        "INSERT INTO upload_chunks(upload_id, chunk_index, data, created_at) "
+        "VALUES(?,?,?,?) "
+        "ON CONFLICT(upload_id, chunk_index) DO UPDATE SET "
+        "data=excluded.data, created_at=excluded.created_at",
+        (upload_id, index, data, now),
+    )
+    con.commit()
+    return jsonify(ok=True)
+
+
 @app.route("/admin/upload", methods=["GET", "POST"])
 @admin_required
 def admin_upload():
@@ -1177,10 +1244,14 @@ def admin_upload():
     plan_action = (request.form.get("plan_action") or "new").strip()
     orders_action = (request.form.get("orders_action") or "new").strip()
     allocations_action = (request.form.get("allocations_action") or "reuse").strip()
-    plan_file = request.files.get("plan_file") if plan_action == "new" else None
-    orders_file = request.files.get("orders_file") if orders_action == "new" else None
-    allocations_file = (request.files.get("allocations_file")
-                        if allocations_action == "new" else None)
+    try:
+        plan_file = _take_upload("plan_file") if plan_action == "new" else None
+        orders_file = _take_upload("orders_file") if orders_action == "new" else None
+        allocations_file = (_take_upload("allocations_file")
+                            if allocations_action == "new" else None)
+    except ValueError as e:
+        flash(f"Upload failed: {e}. Nothing was imported — please try again.", "error")
+        return redirect(url_for("admin_upload"))
     # Allocations report date — derived from filename, with admin override field.
     allocations_date_override = (request.form.get("allocations_date") or "").strip()
     # "Replace all" — clear the allocations table before ingesting this file, for a
